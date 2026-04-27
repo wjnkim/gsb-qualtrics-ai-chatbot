@@ -198,6 +198,54 @@ Qualtrics.SurveyEngine.addOnReady(function () {
     });
   }
 
+ /********************************
+  * INITIALIZE CONVO AUTOMATICALLY
+  ********************************/
+  function kickoffBot() {
+  var typingEl = showTypingIndicator();
+
+  var model = (document.getElementById("safe-model-__QNSAFE__").value || "").trim() || "gpt-4o";
+  var temperature = parseFloat(document.getElementById("safe-temperature-__QNSAFE__").value);
+  if (isNaN(temperature)) temperature = 0.7;
+  var maxTokens = parseInt(document.getElementById("safe-max-tokens-__QNSAFE__").value, 10);
+  if (isNaN(maxTokens)) maxTokens = 300;
+
+  fetch(PROXY_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      prompt: "Begin the interview now.",
+      system: document.getElementById("safe-prompt-__QNSAFE__").value,
+      history: [],
+      model: model,
+      temperature: temperature,
+      max_tokens: maxTokens
+    })
+  })
+    .then(function (response) { return response.json(); })
+    .then(function (data) {
+      var botMessage = (data && data.text ? data.text.trim() : "(no response)");
+      removeTypingIndicator(typingEl);
+      appendMessage(botMessage, "bot-message");
+      conversationHistory1.push({
+        role: "assistant",
+        content: botMessage,
+        time: new Date().toISOString(),
+        question_id: QUESTION_ID
+      });
+      saveChatHistory();
+    })
+    .catch(function (error) {
+      console.error("Kickoff error:", error);
+      removeTypingIndicator(typingEl);
+    });
+  }
+  
+  // Only auto-start if there's no existing chat history (handles back-navigation)
+  if (conversationHistory1.length === 0) {
+    kickoffBot();
+  }
+  
 });
 
 Qualtrics.SurveyEngine.addOnUnload(function () {
