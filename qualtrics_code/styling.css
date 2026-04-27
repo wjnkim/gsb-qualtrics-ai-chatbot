@@ -70,6 +70,23 @@ body {
   color: #333;
 }
 
+.bot-message p { margin: 0 0 0.5em 0; }
+.bot-message p:last-child { margin-bottom: 0; }
+.bot-message ul, .bot-message ol { margin: 0.3em 0; padding-left: 1.5em; }
+.bot-message code {
+  background: rgba(0,0,0,0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 0.9em;
+}
+.bot-message pre {
+  background: rgba(0,0,0,0.06);
+  padding: 8px;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
 #chat-input-__QNSAFE__ {
   display: flex;
   align-items: center;
