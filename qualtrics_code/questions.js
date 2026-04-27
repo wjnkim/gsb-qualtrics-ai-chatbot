@@ -52,7 +52,12 @@ Qualtrics.SurveyEngine.addOnReady(function () {
       });
     }
 
-    el.textContent = text;
+    var isBot = cssClasses && cssClasses.indexOf("bot-message") !== -1;
+    if (isBot && typeof window.marked !== "undefined" && typeof window.DOMPurify !== "undefined") {
+      el.innerHTML = window.DOMPurify.sanitize(window.marked.parse(text));
+    } else {
+      el.textContent = text;
+    }
     chatBox.appendChild(el);
     chatBox.scrollTop = chatBox.scrollHeight;
 
