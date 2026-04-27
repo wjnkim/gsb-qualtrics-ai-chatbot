@@ -11,10 +11,7 @@ on:
       survey_id:
         description: "Qualtrics Survey ID (starts with SV_)"
         required: true
-      survey_name:
-        description: "Survey name in Qualtrics"
-        required: true
-        default: "test"
+        default: "SV_2mImEMPD3rEPWke"
       question_name:
         description: "Unique name for this chat question (e.g. Chat_GPT4, Chat_Mini)"
         required: true
