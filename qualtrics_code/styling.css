@@ -38,7 +38,7 @@ body {
 }
 
 .user-message {
-  font-size: 14px;
+  font-size: 16px;
   margin-left: auto;
   max-width: 70%;
   padding: 0.5rem 0.875rem;
@@ -55,7 +55,7 @@ body {
 }
 
 .bot-message {
-  font-size: 14px;
+  font-size: 16px;
   max-width: 70%;
   padding: 0.5rem 0.875rem;
   border-radius: 12px 12px 12px 0;
