@@ -8,6 +8,9 @@ on:
         required: false
         default: false
         type: boolean
+      survey_id:
+        description: "Qualtrics Survey ID (starts with SV_)"
+        required: true
       survey_name:
         description: "Survey name in Qualtrics"
         required: true
@@ -102,6 +105,9 @@ jobs:
       # --- Run the Python Build Script ---
       - name: Build/Update Qualtrics Survey
         env:
+          # Survey ID
+          SURVEY_ID: ${{ inputs.survey_id }}
+          
           # Secrets
           QUALTRICS_API_TOKEN: ${{ secrets.QUALTRICS_API_TOKEN }}
           QUALTRICS_DATA_CENTER: ${{ vars.QUALTRICS_DATA_CENTER }}
