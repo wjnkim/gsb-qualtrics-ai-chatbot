@@ -26,13 +26,14 @@ on:
       model:
         description: "Select LLM Model"
         required: true
-        default: "gpt-4o"
+        default: "claude-sonnet-4-6"
         type: choice        # <--- This creates the dropdown
         options:
-          - gpt-4.omini     # Corrected from gpt-4.omini
-          - claude-4-sonnet # (Make sure your proxy supports this!)
-          - gpt-5           # (Future proofing?)
-          - gpt-5-mini
+          - claude-sonnet-4-6
+          - claude-opus-4-6
+          - gemini-2.5-pro
+          - gpt-5
+          - gpt-5.4 
       temperature:
         description: "Model temperature (0.0 - 2.0)"
         required: false
