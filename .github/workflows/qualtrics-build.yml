@@ -14,11 +14,11 @@ on:
       survey_name:
         description: "Survey name in Qualtrics"
         required: true
-        default: "test_1"
+        default: "test"
       question_name:
         description: "Unique name for this chat question (e.g. Chat_GPT4, Chat_Mini)"
         required: true
-        default: "chat_ui"
+        default: "chat"
       prompt:
         description: "System prompt for the chatbot"
         required: false
@@ -39,11 +39,11 @@ on:
       temperature:
         description: "Model temperature (0.0 - 2.0)"
         required: false
-        default: "1"
+        default: "0.4"
       max_tokens:
         description: "Max response tokens"
         required: false
-        default: "1000"
+        default: "500"
       max_chats:
         description: "Max user conversation turns"
         required: false
@@ -51,7 +51,7 @@ on:
       delay_per_word:
         description: "Seconds per word of delay before showing bot response (simulates typing speed, 0 for instant)"
         required: false
-        default: "0.05"
+        default: "0"
 
 jobs:
   build-survey:
