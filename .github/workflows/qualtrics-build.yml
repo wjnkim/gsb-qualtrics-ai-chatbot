@@ -28,11 +28,15 @@ on:
         options:
           - claude-sonnet-4-6
           - claude-opus-4-6
+          - claude-opus-4-7
+          - gemini-2.5-flash-lite
           - gemini-2.5-flash
           - gemini-2.5-pro
+          - gpt-4.omini
           - gpt-4o
+          - gpt-5-mini
           - gpt-5
-          - gpt-5.4 
+          - gpt-5.4
       temperature:
         description: "Model temperature (0.0 - 2.0)"
         required: false
