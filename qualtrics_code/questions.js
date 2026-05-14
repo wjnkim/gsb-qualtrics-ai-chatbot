@@ -140,11 +140,14 @@ Qualtrics.SurveyEngine.addOnReady(function () {
     /*********************************************************
      * PROXY REQUEST
      *********************************************************/
+    // Note: do not send `prompt` separately. The current user message is
+    // already the last entry in `conversationHistory1` (pushed above), so
+    // sending it again would cause the model to see two consecutive identical
+    // user turns and confuse short answers (e.g. "3" gets read as "33").
     fetch(PROXY_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        prompt: message,
         system: document.getElementById("safe-prompt-__QNSAFE__").value,
         history: conversationHistory1,
         model: model,

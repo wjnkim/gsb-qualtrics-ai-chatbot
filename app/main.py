@@ -166,8 +166,19 @@ def stanford_proxy(request):
             messages.append({"role": "system", "content": system_prompt})
         if isinstance(history, list):
             messages.extend(history)
+        # Defense-in-depth: only append `user_prompt` if it isn't already the
+        # last user turn in `history`. The frontend used to send the latest
+        # user message in BOTH `prompt` and `history`, which made the model see
+        # two consecutive identical user turns (e.g. "3" + "3" -> "33").
         if user_prompt:
-            messages.append({"role": "user", "content": user_prompt})
+            last = messages[-1] if messages else None
+            already_present = (
+                isinstance(last, dict)
+                and last.get("role") == "user"
+                and last.get("content") == user_prompt
+            )
+            if not already_present:
+                messages.append({"role": "user", "content": user_prompt})
 
         payload = {
             "model": model,
