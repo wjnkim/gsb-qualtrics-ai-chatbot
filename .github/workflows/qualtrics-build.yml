@@ -23,7 +23,7 @@ on:
       model:
         description: "Select LLM Model"
         required: true
-        default: "gpt-5-mini"
+        default: "claude-sonnet-4-6"
         type: choice        # <--- This creates the dropdown
         options:
           - claude-sonnet-4-6
@@ -39,15 +39,15 @@ on:
       temperature:
         description: "Model temperature (0.0 - 2.0)"
         required: false
-        default: "0.4"
+        default: "0"
       max_tokens:
         description: "Max response tokens"
         required: false
-        default: "500"
+        default: "1000"
       max_chats:
         description: "Max user conversation turns"
         required: false
-        default: "99"
+        default: "999"
       delay_per_word:
         description: "Seconds per word of delay before showing bot response (simulates typing speed, 0 for instant)"
         required: false
