@@ -23,7 +23,7 @@ on:
       model:
         description: "Select LLM Model"
         required: true
-        default: "claude-sonnet-4-6"
+        default: "gpt-5-mini"
         type: choice        # <--- This creates the dropdown
         options:
           - claude-sonnet-4-6
