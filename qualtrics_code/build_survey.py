@@ -556,8 +556,18 @@ class QualtricsClient:
         self._req("PUT", f"/survey-definitions/{survey_id}/questions/{question_id}", json=q)
         logger.info("Question %s updated.", question_id)
 
-    def create_descriptive_question(self, survey_id: str, question_text: str, tag: str) -> str:
-        logger.info("Creating new descriptive question with tag '%s'...", tag)
+    def create_descriptive_question(
+        self,
+        survey_id: str,
+        question_text: str,
+        tag: str,
+        block_id: Optional[str] = None,
+    ) -> str:
+        logger.info(
+            "Creating new descriptive question with tag '%s'%s...",
+            tag,
+            f" in block {block_id}" if block_id else "",
+        )
         payload = {
             "QuestionText": question_text,
             "DataExportTag": tag,
@@ -566,7 +576,16 @@ class QualtricsClient:
             "SubSelector": "TX",
             "Configuration": {"QuestionDescriptionOption": "UseText"},
         }
-        resp = self._req("POST", f"/survey-definitions/{survey_id}/questions", json=payload).json()
+        # Some surveys (e.g. those created from imports/templates) lack a
+        # default block, in which case Qualtrics rejects POST /questions
+        # without an explicit blockId with ESRV119 "Invalid Block ID".
+        params = {"blockId": block_id} if block_id else None
+        resp = self._req(
+            "POST",
+            f"/survey-definitions/{survey_id}/questions",
+            json=payload,
+            params=params,
+        ).json()
         qid = resp["result"]["QuestionID"]
         logger.info("Created question %s", qid)
         return qid
@@ -614,6 +633,24 @@ def ensure_survey(client: QualtricsClient, config: Dict[str, Any]) -> str:
     _append_step_summary(f"- Verified survey: `{survey_name}` (SurveyID: `{survey_id}`)\n")
     return survey_id
 
+CHATBOT_BLOCK_DESCRIPTION = "AI Chatbot"
+
+def _find_or_create_chatbot_block(client: QualtricsClient, survey_id: str) -> Tuple[str, bool]:
+    """Find the 'AI Chatbot' block, creating it if missing.
+
+    Returns (block_id, created_new). Used to ensure a valid blockId exists
+    before POST /questions, since surveys without a default block reject
+    blockless question creation with ESRV119 ("Invalid Block ID").
+    """
+    all_blocks = client.get_blocks(survey_id)
+    for bid, bdata in all_blocks.items():
+        if (bdata.get("Description") or "") == CHATBOT_BLOCK_DESCRIPTION:
+            logger.info("Found existing '%s' block: %s", CHATBOT_BLOCK_DESCRIPTION, bid)
+            return bid, False
+    logger.info("No '%s' block found — creating one.", CHATBOT_BLOCK_DESCRIPTION)
+    block_id = client.create_block(survey_id, CHATBOT_BLOCK_DESCRIPTION)
+    return block_id, True
+
 def ensure_chat_question(client: QualtricsClient, survey_id: str, config: Dict[str, Any]) -> Tuple[str, bool]:
     tag = config["data_export_tag"]
     question_name = config["question_name"]
@@ -642,7 +679,11 @@ def ensure_chat_question(client: QualtricsClient, survey_id: str, config: Dict[s
             logger.info("Question %s is up to date. (len=%d sha=%s)", existing_qid, len(current_text), _sha256(current_text))
         return existing_qid, False
 
-    new_qid = client.create_descriptive_question(survey_id, desired_text, tag)
+    # Ensure the chatbot block exists *before* creating the question, so we can
+    # pass an explicit blockId. Without this, surveys lacking a default block
+    # (e.g. imported/templated ones) reject POST /questions with ESRV119.
+    block_id, _ = _find_or_create_chatbot_block(client, survey_id)
+    new_qid = client.create_descriptive_question(survey_id, desired_text, tag, block_id=block_id)
     return new_qid, True
 
 def _next_flow_id(flow_elements: List[Dict]) -> str:
@@ -657,30 +698,15 @@ def _next_flow_id(flow_elements: List[Dict]) -> str:
     next_num = max(existing, default=0) + 1
     return f"FL_{next_num}"
 
-CHATBOT_BLOCK_DESCRIPTION = "AI Chatbot"
-
 def ensure_question_block(
     client: QualtricsClient,
     survey_id: str,
     question_qid: str,
     question_name: str,
 ) -> str:
+    chatbot_block_id, _ = _find_or_create_chatbot_block(client, survey_id)
+    # Re-fetch blocks since the helper may have just created one.
     all_blocks = client.get_blocks(survey_id)
-
-    chatbot_block_id: Optional[str] = None
-    for bid, bdata in all_blocks.items():
-        if (bdata.get("Description") or "") == CHATBOT_BLOCK_DESCRIPTION:
-            chatbot_block_id = bid
-            break
-
-    created_new_block = False
-    if not chatbot_block_id:
-        logger.info("No '%s' block found — creating one.", CHATBOT_BLOCK_DESCRIPTION)
-        chatbot_block_id = client.create_block(survey_id, CHATBOT_BLOCK_DESCRIPTION)
-        created_new_block = True
-        all_blocks = client.get_blocks(survey_id)
-    else:
-        logger.info("Found existing '%s' block: %s", CHATBOT_BLOCK_DESCRIPTION, chatbot_block_id)
 
     for bid, bdata in all_blocks.items():
         if bid == chatbot_block_id:
@@ -712,10 +738,13 @@ def ensure_question_block(
         target_block.setdefault("ID", chatbot_block_id)
         client.update_block(survey_id, chatbot_block_id, target_block)
 
-    if created_new_block:
-        flow = client.get_flow(survey_id)
-        flow_elements = flow.get("Flow", []) or []
-
+    flow = client.get_flow(survey_id)
+    flow_elements = flow.get("Flow", []) or []
+    block_in_flow = any(
+        el.get("Type") == "Standard" and el.get("ID") == chatbot_block_id
+        for el in flow_elements
+    )
+    if not block_in_flow:
         new_flow_element = {
             "Type": "Standard",
             "ID": chatbot_block_id,
@@ -727,6 +756,8 @@ def ensure_question_block(
         flow["Flow"] = flow_elements
         client.update_flow(survey_id, flow)
         logger.info("Added block %s to survey flow at position %d.", chatbot_block_id, insert_pos)
+    else:
+        logger.info("Block %s already present in survey flow — no flow update needed.", chatbot_block_id)
 
     return chatbot_block_id
 
