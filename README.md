@@ -215,16 +215,18 @@ For example, for a question named `Chat_GPT4` the transcript lands in `__js_Chat
 
 > **Why two fields?** In Qualtrics' new survey-taking experience, `Qualtrics.SurveyEngine.setEmbeddedData()` is a deprecated no-op, and `setJSEmbeddedData()` only persists to a Survey Flow field declared **with a `__js_` prefix**. The classic engine uses the un-prefixed field with `setEmbeddedData()`. The build handles both automatically — you don't need to configure anything. (Note: **Preview responses are never recorded** — to confirm saving, take the survey through a real/anonymous link and check Data & Analysis.)
 
-### ⚠️ Known limitation: duplicate opening message in the New Survey-Taking Experience
+### Duplicate opening message? Check the question's JavaScript field
 
-In Qualtrics' **New Survey-Taking Experience**, the chatbot's **opening message can render twice.** The new engine invokes the question's JavaScript (`addOnReady`) **multiple times** for a single rendered question, and there is no in-question guard that reliably prevents the duplicate auto-kickoff:
+If the chatbot's **opening message renders twice**, the cause is a **second copy of the script** running — almost always the chatbot JavaScript sitting in the question's **JavaScript field** *in addition to* the inline `<script>` the build writes into the question text. Two copies → two `addOnReady` handlers → the chatbot kicks off twice.
 
-- A per-call check (`conversationHistory1.length === 0`) doesn't help — each `addOnReady` invocation gets its own fresh, empty state.
-- A DOM-attribute flag doesn't help either — the engine's React rendering wipes manually-set attributes between invocations, so the flag is gone by the next fire.
+This is **independent of the survey-taking experience** (it happens on both New and Classic) and of the prompt. It typically comes from an older/manual setup where the script was pasted into the question's JavaScript editor, and it survives rebuilds because Qualtrics preserves the JavaScript field when the build updates the question text. (Deleting the question doesn't help on its own — it goes to the **Trash**, where the build's tag lookup can find and resurrect it, JavaScript field and all.)
 
-This does **not** occur in the **Classic** survey-taking experience, where `addOnReady` fires once.
+**Fix:**
+1. Open the chat question → **JavaScript** editor → **Clear** → **Save**. (The chatbot's JS must live **only** inline in the question text.)
+2. **Empty the Trash** so a stale copy can't be resurrected on the next build.
+3. Re-publish.
 
-**Recommended workaround:** for surveys that use the AI chatbot, run them on the **Classic survey-taking experience**. (In the survey builder, the banner *"You're using the New Survey-Taking Experience"* links to the opt-out; it can also be changed in the survey's Look & Feel / settings.) Embedded-data saving works in both experiences — the build writes both the `__js_`-prefixed and plain fields — and on the Classic experience the transcript is recorded in the un-prefixed `<question>_chat_history` column and the opening message renders exactly once.
+The build now clears the question's JavaScript field automatically on every run, so a fresh build keeps it clean. (A newly *created* chat question never had this problem — only questions that already carried JavaScript-field code.)
 
 ### Updating an Existing Question
 
@@ -288,7 +290,7 @@ Use this only when troubleshooting workflow failures:
 | "Unauthorized Access" error in survey | Your Qualtrics survey URL isn't in the `ALLOWED_ORIGINS` secret. Add it and re-deploy. |
 | "Too many requests" error | The rate limiter is blocking repeated requests from the same IP. Wait a moment, or adjust `ip_rate_limit` / `ip_max_calls` in `terraform/variables.tf`. |
 | Chat works in the survey but the chat history column is **blank** in responses | You're likely on Qualtrics' **new survey-taking experience**, and the question was built before this was handled. Re-run **Build Qualtrics Survey** for that question, then read the transcript from the **`__js_<question>_chat_history`** column (see [Where the chat transcript is stored](#where-the-chat-transcript-is-stored)). Remember **Preview responses are not saved** — verify with a real/anonymous link. |
-| The chatbot's **opening message shows twice** | Known limitation of the **New Survey-Taking Experience** (the engine fires `addOnReady` multiple times and wipes JS guards between fires). Run the survey on the **Classic** survey-taking experience, where it renders once. See [Known limitation: duplicate opening message](#️-known-limitation-duplicate-opening-message-in-the-new-survey-taking-experience). |
+| The chatbot's **opening message shows twice** | A second copy of the script is running — usually the chatbot JavaScript in the question's **JavaScript field** on top of the inline copy. Open the chat question → **JavaScript** → **Clear** → **Save**, then **empty the Trash** and re-publish. (Independent of survey-taking experience; the build now clears this field automatically.) See [Duplicate opening message?](#duplicate-opening-message-check-the-questions-javascript-field). |
 
 ---
 
