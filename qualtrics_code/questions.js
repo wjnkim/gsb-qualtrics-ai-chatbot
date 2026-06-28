@@ -15,21 +15,24 @@ Qualtrics.SurveyEngine.addOnReady(function () {
 
   /*********************************************************
    * SINGLE-INIT GUARD
-   * Qualtrics' new survey-taking experience can invoke addOnReady
-   * more than once on the SAME rendered question. Without a guard
-   * that duplicates the opening message and double-binds the Send/
-   * Enter handlers. The conversationHistory1 length check below
-   * cannot prevent it: each addOnReady call gets its own fresh,
-   * empty conversationHistory1, so every call kicks off again.
-   * Tag the chat-box DOM node and bail if it is already set up.
-   * (Set synchronously, before any async work, so a second call
-   * that fires before the kickoff fetch resolves still bails.)
+   * Qualtrics' new survey-taking experience invokes addOnReady more
+   * than once for the same question — and at least one of those fires
+   * happens BEFORE the question's custom HTML (the chat box) is in the
+   * DOM. So we must:
+   *   1. Bail if the chat box isn't present yet — a *later* fire (once
+   *      the HTML has mounted) will do the setup. (A guard that merely
+   *      skips itself when the box is missing but then proceeds will
+   *      still kick off, producing a duplicate opening message.)
+   *   2. Once the box exists, run the whole setup exactly once, tagging
+   *      the box so any further fire bails.
+   * The per-call `conversationHistory1.length === 0` check below cannot
+   * prevent the duplication: each addOnReady call gets its own fresh,
+   * empty conversationHistory1, so every call would kick off again.
    *********************************************************/
   var initChatBox = document.getElementById("chat-history-__QNSAFE__");
-  if (initChatBox) {
-    if (initChatBox.getAttribute("data-chatbot-initialized") === "1") return;
-    initChatBox.setAttribute("data-chatbot-initialized", "1");
-  }
+  if (!initChatBox) return; // HTML not mounted yet on this fire — wait for the next
+  if (initChatBox.getAttribute("data-chatbot-initialized") === "1") return;
+  initChatBox.setAttribute("data-chatbot-initialized", "1");
 
   /*********************************************************
    * EMBEDDED DATA WRITER (robust across BOTH experiences)
