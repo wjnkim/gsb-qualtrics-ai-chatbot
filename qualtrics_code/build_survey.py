@@ -566,6 +566,22 @@ class QualtricsClient:
         logger.info("Updating text for question %s...", question_id)
         q = self.get_question(survey_id, question_id)
         q["QuestionText"] = new_text
+        # The chatbot's JavaScript is embedded INLINE in QuestionText, so the
+        # question's separate "JavaScript" field (QuestionJS) must stay empty.
+        # get_question returns the whole question object and we PUT it back, so
+        # any pre-existing QuestionJS (e.g. from an older setup where the script
+        # was pasted into the question's JavaScript editor, or a question
+        # resurrected from the Trash) would be silently preserved across every
+        # rebuild. A leftover copy there runs a SECOND addOnReady -> the chatbot
+        # kicks off twice -> duplicate opening message. Clear it so a build
+        # always yields a single, inline copy of the script.
+        if (q.get("QuestionJS") or "").strip():
+            logger.warning(
+                "Clearing stale QuestionJS on %s (chatbot JS must live inline in "
+                "QuestionText only; a JS-field copy causes a duplicate opening message).",
+                question_id,
+            )
+        q["QuestionJS"] = ""
         self._req("PUT", f"/survey-definitions/{survey_id}/questions/{question_id}", json=q)
         logger.info("Question %s updated.", question_id)
 
