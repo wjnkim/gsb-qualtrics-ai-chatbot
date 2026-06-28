@@ -13,7 +13,40 @@ Qualtrics.SurveyEngine.addOnReady(function () {
   var QUESTION_ID = this.questionId;
   var QUESTION_NAME = "__QUESTION_NAME__";
 
-  Qualtrics.SurveyEngine.setEmbeddedData("__QN__chat_question_id", QUESTION_ID);
+  /*********************************************************
+   * EMBEDDED DATA WRITER (robust across BOTH experiences)
+   *
+   * The two Qualtrics survey-taking engines persist embedded data
+   * from question JS differently, and there is no single call that
+   * works in both:
+   *   - NEW experience: setEmbeddedData() is a deprecated no-op.
+   *     setJSEmbeddedData("X", v) persists ONLY to a Survey Flow
+   *     field declared as "__js_X" (recorded column "__js_X").
+   *   - CLASSIC experience: setEmbeddedData("X", v) persists to a
+   *     plainly-named flow field "X" (recorded column "X").
+   *
+   * So we write through BOTH APIs with the SAME un-prefixed key.
+   * build_survey.py declares BOTH "__js_X" and "X" in the flow, so
+   * whichever engine is active records the value (the other column
+   * stays blank). When reading data, coalesce "__js_X" and "X".
+   * The classic call is skipped in the new experience, where it is
+   * a no-op that only logs a console error.
+   *********************************************************/
+  function setSurveyEmbeddedData(key, value) {
+    var SE = Qualtrics.SurveyEngine;
+    // New experience: persists to the "__js_"-prefixed flow field.
+    if (typeof SE.setJSEmbeddedData === "function") {
+      try { SE.setJSEmbeddedData(key, value); } catch (e) {}
+    }
+    // Classic experience: persists to the plainly-named flow field.
+    // Skip when it's the new-experience deprecated no-op stub.
+    if (typeof SE.setEmbeddedData === "function" &&
+        SE.setEmbeddedData.toString().indexOf("deprecated") === -1) {
+      try { SE.setEmbeddedData(key, value); } catch (e) {}
+    }
+  }
+
+  setSurveyEmbeddedData("__QN__chat_question_id", QUESTION_ID);
 
   /*********************************************************
    * CONFIG + STATE
@@ -83,7 +116,7 @@ Qualtrics.SurveyEngine.addOnReady(function () {
    * EMBEDDED DATA SAVE
    *********************************************************/
   function saveChatHistory() {
-    Qualtrics.SurveyEngine.setEmbeddedData(
+    setSurveyEmbeddedData(
       "__QN__chat_history",
       JSON.stringify(conversationHistory1)
     );
