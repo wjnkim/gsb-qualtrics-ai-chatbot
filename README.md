@@ -215,6 +215,17 @@ For example, for a question named `Chat_GPT4` the transcript lands in `__js_Chat
 
 > **Why two fields?** In Qualtrics' new survey-taking experience, `Qualtrics.SurveyEngine.setEmbeddedData()` is a deprecated no-op, and `setJSEmbeddedData()` only persists to a Survey Flow field declared **with a `__js_` prefix**. The classic engine uses the un-prefixed field with `setEmbeddedData()`. The build handles both automatically — you don't need to configure anything. (Note: **Preview responses are never recorded** — to confirm saving, take the survey through a real/anonymous link and check Data & Analysis.)
 
+### ⚠️ Known limitation: duplicate opening message in the New Survey-Taking Experience
+
+In Qualtrics' **New Survey-Taking Experience**, the chatbot's **opening message can render twice.** The new engine invokes the question's JavaScript (`addOnReady`) **multiple times** for a single rendered question, and there is no in-question guard that reliably prevents the duplicate auto-kickoff:
+
+- A per-call check (`conversationHistory1.length === 0`) doesn't help — each `addOnReady` invocation gets its own fresh, empty state.
+- A DOM-attribute flag doesn't help either — the engine's React rendering wipes manually-set attributes between invocations, so the flag is gone by the next fire.
+
+This does **not** occur in the **Classic** survey-taking experience, where `addOnReady` fires once.
+
+**Recommended workaround:** for surveys that use the AI chatbot, run them on the **Classic survey-taking experience**. (In the survey builder, the banner *"You're using the New Survey-Taking Experience"* links to the opt-out; it can also be changed in the survey's Look & Feel / settings.) Embedded-data saving works in both experiences — the build writes both the `__js_`-prefixed and plain fields — and on the Classic experience the transcript is recorded in the un-prefixed `<question>_chat_history` column and the opening message renders exactly once.
+
 ### Updating an Existing Question
 
 To change the model or prompt for an existing question, run the workflow again with the **same Survey ID and question name** but different settings. It will update the existing question's configuration without creating a duplicate.
@@ -277,6 +288,7 @@ Use this only when troubleshooting workflow failures:
 | "Unauthorized Access" error in survey | Your Qualtrics survey URL isn't in the `ALLOWED_ORIGINS` secret. Add it and re-deploy. |
 | "Too many requests" error | The rate limiter is blocking repeated requests from the same IP. Wait a moment, or adjust `ip_rate_limit` / `ip_max_calls` in `terraform/variables.tf`. |
 | Chat works in the survey but the chat history column is **blank** in responses | You're likely on Qualtrics' **new survey-taking experience**, and the question was built before this was handled. Re-run **Build Qualtrics Survey** for that question, then read the transcript from the **`__js_<question>_chat_history`** column (see [Where the chat transcript is stored](#where-the-chat-transcript-is-stored)). Remember **Preview responses are not saved** — verify with a real/anonymous link. |
+| The chatbot's **opening message shows twice** | Known limitation of the **New Survey-Taking Experience** (the engine fires `addOnReady` multiple times and wipes JS guards between fires). Run the survey on the **Classic** survey-taking experience, where it renders once. See [Known limitation: duplicate opening message](#️-known-limitation-duplicate-opening-message-in-the-new-survey-taking-experience). |
 
 ---
 
