@@ -16,23 +16,27 @@ Qualtrics.SurveyEngine.addOnReady(function () {
   /*********************************************************
    * SINGLE-INIT GUARD
    * Qualtrics' new survey-taking experience invokes addOnReady more
-   * than once for the same question — and at least one of those fires
-   * happens BEFORE the question's custom HTML (the chat box) is in the
-   * DOM. So we must:
-   *   1. Bail if the chat box isn't present yet — a *later* fire (once
-   *      the HTML has mounted) will do the setup. (A guard that merely
-   *      skips itself when the box is missing but then proceeds will
-   *      still kick off, producing a duplicate opening message.)
-   *   2. Once the box exists, run the whole setup exactly once, tagging
-   *      the box so any further fire bails.
-   * The per-call `conversationHistory1.length === 0` check below cannot
-   * prevent the duplication: each addOnReady call gets its own fresh,
-   * empty conversationHistory1, so every call would kick off again.
+   * than once for the same question, which would otherwise produce a
+   * duplicate opening message and double-bound Send/Enter handlers.
+   *
+   * The guard MUST use a window-level flag, not a DOM attribute or a
+   * per-call variable:
+   *   - A per-call check (e.g. conversationHistory1.length === 0) fails
+   *     because each addOnReady call gets its own fresh closure/array.
+   *   - A DOM-attribute flag fails because the new experience's React
+   *     rendering wipes manually-set attributes between fires, so the
+   *     flag is gone by the next fire (observed live: attribute set to
+   *     "1" yet the opening message still rendered twice).
+   * `window` is shared across every addOnReady fire in this (single,
+   * non-iframed) document and is untouched by React reconciliation, so
+   * the setup runs exactly once. Keyed by token for multi-chat surveys.
+   *
+   * Also bail until the chat box exists, so an early pre-mount fire
+   * doesn't burn the flag before the UI can be wired up.
    *********************************************************/
-  var initChatBox = document.getElementById("chat-history-__QNSAFE__");
-  if (!initChatBox) return; // HTML not mounted yet on this fire — wait for the next
-  if (initChatBox.getAttribute("data-chatbot-initialized") === "1") return;
-  initChatBox.setAttribute("data-chatbot-initialized", "1");
+  if (!document.getElementById("chat-history-__QNSAFE__")) return; // HTML not mounted yet
+  if (window["__chatbotInitialized_" + "__QNSAFE__"]) return;      // already initialized this page
+  window["__chatbotInitialized_" + "__QNSAFE__"] = true;
 
   /*********************************************************
    * EMBEDDED DATA WRITER (robust across BOTH experiences)
