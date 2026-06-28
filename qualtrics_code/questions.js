@@ -14,6 +14,24 @@ Qualtrics.SurveyEngine.addOnReady(function () {
   var QUESTION_NAME = "__QUESTION_NAME__";
 
   /*********************************************************
+   * SINGLE-INIT GUARD
+   * Qualtrics' new survey-taking experience can invoke addOnReady
+   * more than once on the SAME rendered question. Without a guard
+   * that duplicates the opening message and double-binds the Send/
+   * Enter handlers. The conversationHistory1 length check below
+   * cannot prevent it: each addOnReady call gets its own fresh,
+   * empty conversationHistory1, so every call kicks off again.
+   * Tag the chat-box DOM node and bail if it is already set up.
+   * (Set synchronously, before any async work, so a second call
+   * that fires before the kickoff fetch resolves still bails.)
+   *********************************************************/
+  var initChatBox = document.getElementById("chat-history-__QNSAFE__");
+  if (initChatBox) {
+    if (initChatBox.getAttribute("data-chatbot-initialized") === "1") return;
+    initChatBox.setAttribute("data-chatbot-initialized", "1");
+  }
+
+  /*********************************************************
    * EMBEDDED DATA WRITER (robust across BOTH experiences)
    *
    * The two Qualtrics survey-taking engines persist embedded data
