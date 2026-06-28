@@ -149,8 +149,21 @@ def get_question_fields(question_token: str) -> Dict[str, str]:
         f"{prefix}max_tokens": os.environ.get("MAX_TOKENS", "1000"),
         f"{prefix}max_chats": os.environ.get("MAX_CHATS", "99"),
         f"{prefix}delay_per_word": os.environ.get("DELAY_PER_WORD", "0.1"),
-        f"{prefix}chat_history": "",
-        f"{prefix}chat_question_id": "",
+        # Fields WRITTEN by question JS need DIFFERENT flow declarations per
+        # survey-taking engine, so we declare BOTH and let questions.js write
+        # through both APIs (see setSurveyEmbeddedData there):
+        #   - NEW experience: setJSEmbeddedData persists only to a field declared
+        #     WITH a literal "__js_" prefix -> recorded column "__js_<token>_...".
+        #   - CLASSIC experience: setEmbeddedData persists to the plainly-named
+        #     field -> recorded column "<token>_...".
+        # Whichever engine is active populates its column; the other stays blank.
+        # When analyzing, COALESCE the "__js_" and plain columns.
+        # (Config fields above stay unprefixed: they are piped INTO the page and
+        # read by JS, never written from JS.)
+        f"__js_{prefix}chat_history": "",       # new experience target
+        f"{prefix}chat_history": "",            # classic experience target
+        f"__js_{prefix}chat_question_id": "",   # new experience target
+        f"{prefix}chat_question_id": "",        # classic experience target
     }
     logger.info("Question fields loaded for token '%s' (prefix: '%s').", question_token, prefix)
     verbose_field_logs = os.environ.get("VERBOSE_FIELD_LOGS", "false").lower() == "true"

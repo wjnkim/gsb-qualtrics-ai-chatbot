@@ -198,9 +198,22 @@ You can add as many chat questions as you want to a single survey. Just run the 
 - **Run 1:** Survey ID = `SV_1Ll5d8kcWzt30rQ`, Question = `Chat_GPT4`, Model = `gpt-4o`, Prompt = "You are a helpful assistant"
 - **Run 2:** Survey ID = `SV_1Ll5d8kcWzt30rQ`, Question = `Chat_Mini`, Model = `gpt-4o-mini`, Prompt = "You are a concise assistant"
 
-Each question gets its own model, prompt, temperature, token limit, and conversation limit. Chat histories are saved separately per question (e.g. `chat_history_Chat_GPT4`, `chat_history_Chat_Mini`).
+Each question gets its own model, prompt, temperature, token limit, and conversation limit. Chat histories are saved separately per question — see [Where the chat transcript is stored](#where-the-chat-transcript-is-stored) for the exact column names.
 
 > **Important:** If your survey has multiple chat questions, make sure each one is on its own page in Qualtrics (this is the default). Having two chat questions on the same page is not supported.
+
+### Where the chat transcript is stored
+
+The full conversation (and the chat question's QID) is saved to your survey responses as **Embedded Data**. The build script declares **two** fields per chat question and the in-survey JavaScript writes to **both**, so the transcript is captured no matter which Qualtrics survey-taking engine renders the survey:
+
+| Survey-taking experience | Column holding the transcript |
+|---|---|
+| **New** (a.k.a. Simple Layout / New Survey-Taking Experience) | `__js_<question>_chat_history` |
+| **Classic** | `<question>_chat_history` |
+
+For example, for a question named `Chat_GPT4` the transcript lands in `__js_Chat_GPT4_chat_history` **or** `Chat_GPT4_chat_history`. When exporting or analyzing, **coalesce the two columns** (use whichever is non-empty). The same applies to `…_chat_question_id`.
+
+> **Why two fields?** In Qualtrics' new survey-taking experience, `Qualtrics.SurveyEngine.setEmbeddedData()` is a deprecated no-op, and `setJSEmbeddedData()` only persists to a Survey Flow field declared **with a `__js_` prefix**. The classic engine uses the un-prefixed field with `setEmbeddedData()`. The build handles both automatically — you don't need to configure anything. (Note: **Preview responses are never recorded** — to confirm saving, take the survey through a real/anonymous link and check Data & Analysis.)
 
 ### Updating an Existing Question
 
@@ -263,6 +276,7 @@ Use this only when troubleshooting workflow failures:
 | Survey works but AI doesn't respond | Check that `SERVICE_ENABLED` is `"true"` in `terraform/main.tf`. Also verify your `STANFORD_API_KEY` is valid. |
 | "Unauthorized Access" error in survey | Your Qualtrics survey URL isn't in the `ALLOWED_ORIGINS` secret. Add it and re-deploy. |
 | "Too many requests" error | The rate limiter is blocking repeated requests from the same IP. Wait a moment, or adjust `ip_rate_limit` / `ip_max_calls` in `terraform/variables.tf`. |
+| Chat works in the survey but the chat history column is **blank** in responses | You're likely on Qualtrics' **new survey-taking experience**, and the question was built before this was handled. Re-run **Build Qualtrics Survey** for that question, then read the transcript from the **`__js_<question>_chat_history`** column (see [Where the chat transcript is stored](#where-the-chat-transcript-is-stored)). Remember **Preview responses are not saved** — verify with a real/anonymous link. |
 
 ---
 
