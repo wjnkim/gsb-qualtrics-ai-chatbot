@@ -1,5 +1,38 @@
 Qualtrics.SurveyEngine.addOnload(function () {
   // runs when the page loads (before addOnReady)
+
+  /*********************************************************
+   * PRE-PAINT NEXT-BUTTON HIDE (optional)
+   *
+   * When this question is configured to gate the Next button
+   * (__QN__hide_next_until_ping === "true"), hide it here — before the
+   * page is fully painted — so the button never flashes on screen.
+   * addOnReady (below) wires up the logic that reveals it again.
+   *
+   * We hide with a CSS rule scoped to a class on <html> (an element
+   * Qualtrics never re-renders, so the rule survives the new
+   * experience's single-page transitions) and use `visibility` so the
+   * surrounding nav layout does not shift when the button reappears.
+   *********************************************************/
+  try {
+    var cfg = document.getElementById("safe-hide-next-until-ping-__QNSAFE__");
+    if (cfg && (cfg.value || "").trim().toLowerCase() === "true") {
+      var cls = "qc-hide-next-__QNSAFE__";
+      if (!document.getElementById("qc-hide-style-__QNSAFE__")) {
+        var css =
+          "html." + cls + " #NextButton," +
+          "html." + cls + " #Buttons #NextButton," +   /* classic: <input id="NextButton"> */
+          "html." + cls + " #next-button," +
+          "html." + cls + " #navigation #next-button" + /* new experience: <button id="next-button"> */
+          "{visibility:hidden !important;}";
+        var style = document.createElement("style");
+        style.id = "qc-hide-style-__QNSAFE__";
+        style.appendChild(document.createTextNode(css));
+        (document.head || document.documentElement).appendChild(style);
+      }
+      document.documentElement.classList.add(cls);
+    }
+  } catch (e) {}
 });
 
 Qualtrics.SurveyEngine.addOnReady(function () {
@@ -10,6 +43,8 @@ Qualtrics.SurveyEngine.addOnReady(function () {
    * __QNSAFE__ is replaced with a DOM-safe question token
    * __QUESTION_NAME__ is replaced with the literal question name
    *********************************************************/
+  var qthis = this;                 // question instance — needed inside async
+                                    // callbacks, where `this` is NOT the question
   var QUESTION_ID = this.questionId;
   var QUESTION_NAME = "__QUESTION_NAME__";
 
@@ -65,6 +100,110 @@ Qualtrics.SurveyEngine.addOnReady(function () {
   var DELAY_PER_WORD = parseFloat(document.getElementById("safe-delay-per-word-__QNSAFE__").value);
   if (isNaN(DELAY_PER_WORD) || DELAY_PER_WORD < 0) DELAY_PER_WORD = 0;
   var MAX_DELAY_SECONDS = 10;
+
+  /*********************************************************
+   * NEXT-BUTTON GATE (optional)
+   *
+   * When __QN__hide_next_until_ping === "true", the survey's built-in
+   * Next button starts hidden and is revealed only when the chatbot
+   * signals the interview is over. The signal ("ping") is a sentinel
+   * token the model is instructed to emit at the very end of its final
+   * message (build_survey.py appends that instruction to the system
+   * prompt automatically when this option is on). We strip the token
+   * from the visible message + saved transcript, then reveal the button.
+   *
+   * Reliability (verified against Qualtrics docs + community):
+   *  - qthis.hideNextButton()/showNextButton() are the official methods
+   *    and work in BOTH the new and classic experiences (they abstract
+   *    the button markup, which differs between engines). Primary path.
+   *  - Fallback: toggle a class on <html> (never re-rendered) driving a
+   *    CSS `visibility` rule (not display, so layout is stable). This
+   *    survives the new experience's page transitions.
+   *  - A reveal is ALWAYS guaranteed eventually — on ping, on reaching
+   *    MAX_CHATS, and via an inactivity failsafe timer — so a respondent
+   *    can never get permanently stuck with no way to advance.
+   *********************************************************/
+  var HIDE_NEXT = (document.getElementById("safe-hide-next-until-ping-__QNSAFE__").value || "")
+    .trim().toLowerCase() === "true";
+
+  // Inactivity failsafe: reveal the Next button if there is no chat activity
+  // for this many minutes (default 5). The timer resets on every user send and
+  // every bot reply, so it never fires mid-interview — only once the
+  // conversation has stalled (e.g. the model forgot to emit the ping). A value
+  // of 0 disables the failsafe (not recommended: ping + MAX_CHATS would then be
+  // the only ways to reveal the button).
+  var SHOW_NEXT_AFTER_MIN = parseFloat(
+    document.getElementById("safe-show-next-after-minutes-__QNSAFE__").value
+  );
+  if (isNaN(SHOW_NEXT_AFTER_MIN) || SHOW_NEXT_AFTER_MIN < 0) SHOW_NEXT_AFTER_MIN = 5;
+  var SHOW_NEXT_AFTER_MS = SHOW_NEXT_AFTER_MIN * 60 * 1000;
+
+  // Sentinel the model emits when the interview is complete. MUST stay in sync
+  // with PING_TOKEN in build_survey.py. Matched tolerantly (case + inner
+  // whitespace) and stripped before display/save.
+  // Token: [[END_INTERVIEW]]
+  var HIDE_CLASS = "qc-hide-next-__QNSAFE__";
+  var nextRevealed = false;
+  var inactivityTimer = null;
+
+  function injectHideStyle() {
+    if (document.getElementById("qc-hide-style-__QNSAFE__")) return;
+    var css =
+      "html." + HIDE_CLASS + " #NextButton," +
+      "html." + HIDE_CLASS + " #Buttons #NextButton," +
+      "html." + HIDE_CLASS + " #next-button," +
+      "html." + HIDE_CLASS + " #navigation #next-button" +
+      "{visibility:hidden !important;}";
+    var style = document.createElement("style");
+    style.id = "qc-hide-style-__QNSAFE__";
+    style.appendChild(document.createTextNode(css));
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function clearInactivityTimer() {
+    if (inactivityTimer) { clearTimeout(inactivityTimer); inactivityTimer = null; }
+  }
+
+  function armInactivityTimer() {
+    if (!HIDE_NEXT || nextRevealed || SHOW_NEXT_AFTER_MS <= 0) return;
+    clearInactivityTimer();
+    inactivityTimer = setTimeout(function () {
+      // Conversation stalled without a ping — reveal so no one gets stuck.
+      revealNext();
+    }, SHOW_NEXT_AFTER_MS);
+  }
+
+  function hideNext() {
+    if (!HIDE_NEXT) return;
+    injectHideStyle();
+    document.documentElement.classList.add(HIDE_CLASS);
+    try { qthis.hideNextButton(); } catch (e) {}
+  }
+
+  function revealNext() {
+    clearInactivityTimer();
+    if (nextRevealed) return;
+    nextRevealed = true;
+    // Remove the gating class first (the CSS rule stops matching -> visible),
+    // then the official API, then a belt-and-suspenders inline clear.
+    document.documentElement.classList.remove(HIDE_CLASS);
+    try { qthis.showNextButton(); } catch (e) {}
+    var b = document.getElementById("next-button") ||
+            document.getElementById("NextButton");
+    if (b) b.style.visibility = "visible";
+  }
+
+  // Remove the ping token (if present) from a bot message.
+  // Returns { text: cleanedMessage, ping: booleanWasPresent }.
+  function extractPing(text) {
+    if (typeof text !== "string") return { text: text, ping: false };
+    var ping = /\[\[\s*END_INTERVIEW\s*\]\]/i.test(text);
+    var cleaned = text
+      .replace(/\[\[\s*END_INTERVIEW\s*\]\]/gi, "")
+      .replace(/[ \t]+\n/g, "\n")
+      .trim();
+    return { text: cleaned, ping: ping };
+  }
 
   /*********************************************************
    * UI HELPERS
@@ -123,6 +262,37 @@ Qualtrics.SurveyEngine.addOnReady(function () {
   }
 
   /*********************************************************
+   * BOT REPLY HANDLER (shared by kickoff + send)
+   *
+   * Strips the ping token, renders + stores the cleaned message, then
+   * either reveals the Next button (ping seen) or re-arms the inactivity
+   * failsafe. An empty message (e.g. the model sent only the token) is
+   * not rendered as a blank bubble.
+   *********************************************************/
+  function handleBotReply(rawText) {
+    var parsed = extractPing(rawText);
+    var botMessage = parsed.text;
+    if (!botMessage && !parsed.ping) botMessage = "(no response)";
+
+    if (botMessage) {
+      appendMessage(botMessage, "bot-message");
+      conversationHistory1.push({
+        role: "assistant",
+        content: botMessage,
+        time: new Date().toISOString(),
+        question_id: QUESTION_ID
+      });
+      saveChatHistory();
+    }
+
+    if (parsed.ping) {
+      revealNext();
+    } else {
+      armInactivityTimer();
+    }
+  }
+
+  /*********************************************************
    * MAIN SEND FUNCTION
    *********************************************************/
   function sendMessage() {
@@ -139,6 +309,7 @@ Qualtrics.SurveyEngine.addOnReady(function () {
 
     if (userTurns >= MAX_CHATS) {
       appendMessage("Chat limit reached. Please continue the survey.", "bot-message");
+      revealNext();   // never trap the respondent once the cap is hit
       return;
     }
 
@@ -154,6 +325,7 @@ Qualtrics.SurveyEngine.addOnReady(function () {
 
     saveChatHistory();
     messageInput.value = "";
+    armInactivityTimer();   // user activity resets the failsafe timer
 
     // Show typing indicator
     var typingEl = showTypingIndicator();
@@ -190,31 +362,27 @@ Qualtrics.SurveyEngine.addOnReady(function () {
     })
       .then(function (response) { return response.json(); })
       .then(function (data) {
-        var botMessage = (data && data.text ? data.text.trim() : "(no response)");
+        // Strip the ping token BEFORE measuring word count / rendering.
+        var parsed = extractPing(data && data.text ? data.text.trim() : "(no response)");
+        var display = parsed.text;
+        if (!display && !parsed.ping) display = "(no response)";
 
         // Dynamic delay: scale by word count to mimic human typing speed
-        var wordCount = botMessage.split(/\s+/).filter(Boolean).length;
+        var wordCount = display.split(/\s+/).filter(Boolean).length;
         var dynamicDelay = Math.min(wordCount * DELAY_PER_WORD, MAX_DELAY_SECONDS) * 1000;
 
         setTimeout(function () {
           removeTypingIndicator(typingEl);
-
-          appendMessage(botMessage, "bot-message");
-
-          conversationHistory1.push({
-            role: "assistant",
-            content: botMessage,
-            time: new Date().toISOString(),
-            question_id: QUESTION_ID
-          });
-
-          saveChatHistory();
+          handleBotReply(data && data.text ? data.text.trim() : "(no response)");
         }, dynamicDelay);
       })
       .catch(function (error) {
         console.error("Proxy fetch error:", error);
         removeTypingIndicator(typingEl);
         appendMessage("Sorry — something went wrong talking to the server.", "bot-message");
+        // Do not reveal here: the inactivity failsafe (armed on send) will
+        // reveal the Next button if the outage persists, without letting a
+        // transient blip end the interview early.
       });
   }
 
@@ -260,28 +428,27 @@ Qualtrics.SurveyEngine.addOnReady(function () {
   })
     .then(function (response) { return response.json(); })
     .then(function (data) {
-      var botMessage = (data && data.text ? data.text.trim() : "(no response)");
       removeTypingIndicator(typingEl);
-      appendMessage(botMessage, "bot-message");
-      conversationHistory1.push({
-        role: "assistant",
-        content: botMessage,
-        time: new Date().toISOString(),
-        question_id: QUESTION_ID
-      });
-      saveChatHistory();
+      // Defensive: honor a ping even on the opening turn (normally absent).
+      handleBotReply(data && data.text ? data.text.trim() : "(no response)");
     })
     .catch(function (error) {
       console.error("Kickoff error:", error);
       removeTypingIndicator(typingEl);
     });
   }
-  
+
+  // Gate the Next button (if configured) before starting the conversation.
+  if (HIDE_NEXT) {
+    hideNext();
+    armInactivityTimer();
+  }
+
   // Only auto-start if there's no existing chat history (handles back-navigation)
   if (conversationHistory1.length === 0) {
     kickoffBot();
   }
-  
+
 });
 
 Qualtrics.SurveyEngine.addOnUnload(function () {

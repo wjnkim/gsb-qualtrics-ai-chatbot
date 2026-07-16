@@ -52,6 +52,15 @@ on:
         description: "Seconds per word of delay before showing bot response (simulates typing speed, 0 for instant)"
         required: false
         default: "0"
+      hide_next_until_ping:
+        description: "Hide the survey's Next button until the chatbot signals the conversation is over. Auto-adds the end-of-chat marker instruction to your prompt."
+        required: false
+        default: false
+        type: boolean
+      show_next_after_minutes:
+        description: "Failsafe: reveal the Next button after this many minutes of chat inactivity even without the marker (only used when 'hide_next_until_ping' is on; 0 disables the failsafe)"
+        required: false
+        default: "5"
 
 jobs:
   build-survey:
@@ -127,7 +136,9 @@ jobs:
           MAX_TOKENS: ${{ inputs.max_tokens }}
           MAX_CHATS: ${{ inputs.max_chats }}
           DELAY_PER_WORD: ${{ inputs.delay_per_word }}
-          
+          HIDE_NEXT_UNTIL_PING: ${{ inputs.hide_next_until_ping }}
+          SHOW_NEXT_AFTER_MINUTES: ${{ inputs.show_next_after_minutes }}
+
           # Debug logging (explicit opt-in)
           LOG_LEVEL: ${{ inputs.debug_mode == true && 'DEBUG' || 'INFO' }}
           VERBOSE_FIELD_LOGS: ${{ inputs.debug_mode == true && 'true' || 'false' }}
