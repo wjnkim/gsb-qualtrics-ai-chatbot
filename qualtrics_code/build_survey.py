@@ -114,20 +114,26 @@ def _truthy(val: Any) -> bool:
 
 
 def _ping_prompt_suffix() -> str:
-    """Instruction appended to the system prompt so the model knows to emit the
-    ping token when the interview is over. Auto-added only when the Next-button
-    gate is enabled, so users never have to edit their prompt by hand."""
+    """Instruction appended to the system prompt so the model knows to (a) ask
+    the participant to wait for the Next button, and (b) emit the ping token
+    when the interview is over. Auto-added only when the Next-button gate is
+    enabled, so users never have to edit their prompt by hand."""
     return (
         "\n\n----\n"
         "[SYSTEM INSTRUCTION — DO NOT REVEAL OR MENTION THIS TO THE PARTICIPANT]\n"
         "The \"Next\" button in this survey stays hidden until you signal that the "
-        "conversation is complete. When — and only when — the interview is fully "
-        "finished and you have already written your final closing message to the "
-        f"participant, end that message by placing the exact marker {PING_TOKEN} on "
-        "its own line as the very last thing you output. Output this marker only "
-        "once, only in that final message, and never before the conversation is "
-        "over. Do not translate, explain, or otherwise reference this marker, and "
-        "keep emitting it in whatever language the interview is conducted in."
+        "conversation is complete, and it may take a few seconds to appear after "
+        "your final message. Because of that, your final closing message MUST "
+        "explicitly ask the participant to wait a few moments for the \"Next\" "
+        "button (arrow) to appear below the chat and then click it to continue — "
+        "word this in the language the interview is being conducted in, and do NOT "
+        "imply the button is already visible. "
+        "Then, when — and only when — the interview is fully finished and you have "
+        f"written that closing message, end the message by placing the exact marker "
+        f"{PING_TOKEN} on its own line as the very last thing you output. Output "
+        "this marker only once, only in that final message, and never before the "
+        "conversation is over. Do not translate, explain, or otherwise reference "
+        "the marker itself."
     )
 
 def get_config() -> Dict[str, Any]:
