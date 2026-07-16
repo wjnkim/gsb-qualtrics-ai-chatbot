@@ -58,7 +58,7 @@ on:
         default: false
         type: boolean
       show_next_after_minutes:
-        description: "Failsafe: reveal the Next button after this many minutes of chat inactivity even without the marker (only used when 'hide_next_until_ping' is on; 0 disables the failsafe)"
+        description: "Failsafe: reveal the Next button this many minutes after the chat loads even without the marker (fixed timer; only used when 'hide_next_until_ping' is on; 0 disables). Set above your longest expected interview."
         required: false
         default: "5"
 

@@ -120,18 +120,18 @@ Qualtrics.SurveyEngine.addOnReady(function () {
    *    CSS `visibility` rule (not display, so layout is stable). This
    *    survives the new experience's page transitions.
    *  - A reveal is ALWAYS guaranteed eventually — on ping, on reaching
-   *    MAX_CHATS, and via an inactivity failsafe timer — so a respondent
-   *    can never get permanently stuck with no way to advance.
+   *    MAX_CHATS, and via a fixed failsafe timer that fires a set number of
+   *    minutes after load — so a respondent can never get permanently stuck.
    *********************************************************/
   var HIDE_NEXT = (document.getElementById("safe-hide-next-until-ping-__QNSAFE__").value || "")
     .trim().toLowerCase() === "true";
 
-  // Inactivity failsafe: reveal the Next button if there is no chat activity
-  // for this many minutes (default 5). The timer resets on every user send and
-  // every bot reply, so it never fires mid-interview — only once the
-  // conversation has stalled (e.g. the model forgot to emit the ping). A value
-  // of 0 disables the failsafe (not recommended: ping + MAX_CHATS would then be
-  // the only ways to reveal the button).
+  // Failsafe timer: reveal the Next button this many minutes after the chat
+  // loads (default 5), regardless of activity. It is a fixed countdown started
+  // once on load and never reset, so set it comfortably above your longest
+  // expected interview or it may reveal the button mid-conversation. A value of
+  // 0 disables the failsafe (not recommended: ping + MAX_CHATS would then be the
+  // only ways to reveal the button).
   var SHOW_NEXT_AFTER_MIN = parseFloat(
     document.getElementById("safe-show-next-after-minutes-__QNSAFE__").value
   );
@@ -144,7 +144,8 @@ Qualtrics.SurveyEngine.addOnReady(function () {
   // Token: [[END_INTERVIEW]]
   var HIDE_CLASS = "qc-hide-next-__QNSAFE__";
   var nextRevealed = false;
-  var inactivityTimer = null;
+  var failsafeTimer = null;
+  var failsafeStarted = false;
 
   function injectHideStyle() {
     if (document.getElementById("qc-hide-style-__QNSAFE__")) return;
@@ -160,15 +161,18 @@ Qualtrics.SurveyEngine.addOnReady(function () {
     (document.head || document.documentElement).appendChild(style);
   }
 
-  function clearInactivityTimer() {
-    if (inactivityTimer) { clearTimeout(inactivityTimer); inactivityTimer = null; }
+  function clearFailsafeTimer() {
+    if (failsafeTimer) { clearTimeout(failsafeTimer); failsafeTimer = null; }
   }
 
-  function armInactivityTimer() {
+  // Fixed countdown from page load. Started once and never reset, so it fires
+  // a set number of minutes after the chat loads regardless of activity.
+  function startFailsafeTimer() {
     if (!HIDE_NEXT || nextRevealed || SHOW_NEXT_AFTER_MS <= 0) return;
-    clearInactivityTimer();
-    inactivityTimer = setTimeout(function () {
-      // Conversation stalled without a ping — reveal so no one gets stuck.
+    if (failsafeStarted) return;
+    failsafeStarted = true;
+    failsafeTimer = setTimeout(function () {
+      // Time is up — reveal so no one gets stuck (even if the chat is ongoing).
       revealNext();
     }, SHOW_NEXT_AFTER_MS);
   }
@@ -181,7 +185,7 @@ Qualtrics.SurveyEngine.addOnReady(function () {
   }
 
   function revealNext() {
-    clearInactivityTimer();
+    clearFailsafeTimer();
     if (nextRevealed) return;
     nextRevealed = true;
     // Remove the gating class first (the CSS rule stops matching -> visible),
@@ -264,10 +268,10 @@ Qualtrics.SurveyEngine.addOnReady(function () {
   /*********************************************************
    * BOT REPLY HANDLER (shared by kickoff + send)
    *
-   * Strips the ping token, renders + stores the cleaned message, then
-   * either reveals the Next button (ping seen) or re-arms the inactivity
-   * failsafe. An empty message (e.g. the model sent only the token) is
-   * not rendered as a blank bubble.
+   * Strips the ping token, renders + stores the cleaned message, and
+   * reveals the Next button if the ping was present. An empty message
+   * (e.g. the model sent only the token) is not rendered as a blank
+   * bubble. The failsafe timer runs independently from page load.
    *********************************************************/
   function handleBotReply(rawText) {
     var parsed = extractPing(rawText);
@@ -287,8 +291,6 @@ Qualtrics.SurveyEngine.addOnReady(function () {
 
     if (parsed.ping) {
       revealNext();
-    } else {
-      armInactivityTimer();
     }
   }
 
@@ -325,7 +327,6 @@ Qualtrics.SurveyEngine.addOnReady(function () {
 
     saveChatHistory();
     messageInput.value = "";
-    armInactivityTimer();   // user activity resets the failsafe timer
 
     // Show typing indicator
     var typingEl = showTypingIndicator();
@@ -380,9 +381,9 @@ Qualtrics.SurveyEngine.addOnReady(function () {
         console.error("Proxy fetch error:", error);
         removeTypingIndicator(typingEl);
         appendMessage("Sorry — something went wrong talking to the server.", "bot-message");
-        // Do not reveal here: the inactivity failsafe (armed on send) will
-        // reveal the Next button if the outage persists, without letting a
-        // transient blip end the interview early.
+        // Do not reveal here: the failsafe timer (started on load) will reveal
+        // the Next button when it elapses, without letting a transient blip end
+        // the interview early.
       });
   }
 
@@ -441,7 +442,7 @@ Qualtrics.SurveyEngine.addOnReady(function () {
   // Gate the Next button (if configured) before starting the conversation.
   if (HIDE_NEXT) {
     hideNext();
-    armInactivityTimer();
+    startFailsafeTimer();
   }
 
   // Only auto-start if there's no existing chat history (handles back-navigation)
