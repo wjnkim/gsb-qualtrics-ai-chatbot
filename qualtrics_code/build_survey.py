@@ -193,7 +193,8 @@ def get_question_fields(question_token: str) -> Dict[str, str]:
         f"{prefix}delay_per_word": os.environ.get("DELAY_PER_WORD", "0.1"),
         # Next-button gate config (read by questions.js via the DOM bridge):
         #   hide_next_until_ping  -> "true"/"false"
-        #   show_next_after_minutes -> inactivity failsafe (minutes; 0 disables)
+        #   show_next_after_minutes -> fixed failsafe timer from page load
+        #                              (minutes; 0 disables)
         f"{prefix}hide_next_until_ping": "true" if hide_next else "false",
         f"{prefix}show_next_after_minutes": os.environ.get("SHOW_NEXT_AFTER_MINUTES", "5"),
         # Fields WRITTEN by question JS need DIFFERENT flow declarations per

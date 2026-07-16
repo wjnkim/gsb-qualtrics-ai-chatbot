@@ -186,7 +186,7 @@ This step configures your Qualtrics survey (created in Phase 5) to work with you
 | **Max user conversation turns** | How many back-and-forth messages are allowed for this question | `99` for unlimited-feeling, or a smaller number to cap it |
 | **Seconds per word of delay** | How many seconds of delay (per word) before showing bot response | `0` for instant, or a slightly larger number like `0.05` to slow the response |
 | **Hide next until ping** | Hide the survey's **Next** button until the chatbot signals the conversation is over. See [Hiding the Next button until the chat is done](#hiding-the-next-button-until-the-chat-is-done). | Leave **unchecked** for the normal always-visible Next button; check it to gate the button on the chatbot |
-| **Show next after minutes** | Failsafe used only when *Hide next until ping* is on: reveal the Next button automatically after this many minutes of chat **inactivity**, even if the marker never arrives | `5` (raise it above your longest expected interview so it never fires mid-conversation; `0` disables the failsafe) |
+| **Show next after minutes** | Failsafe used only when *Hide next until ping* is on: a **fixed timer** that reveals the Next button this many minutes after the chat loads, even if the marker never arrives | `5` (set it above your longest expected interview, since the timer does **not** reset on activity; `0` disables the failsafe) |
 
 5. Click the green **Run workflow** button
 6. Wait for completion (1-2 minutes)
@@ -217,9 +217,9 @@ By default the survey's **Next** button is visible the whole time, so a particip
 
 - the marker arrives (normal case);
 - the **Max user conversation turns** cap is reached; or
-- the **Show next after minutes** inactivity failsafe fires (default 5 minutes with no messages in either direction).
+- the **Show next after minutes** failsafe timer fires (default 5 minutes after the chat loads).
 
-> **Tune the failsafe to your interview length.** The failsafe timer is an *inactivity* timer — it resets on every message and only fires once the conversation has genuinely stalled, so it won't cut off an active interview. Still, set **Show next after minutes** comfortably above how long a real participant might pause mid-interview. Set it to `0` to disable the failsafe entirely (only do this if you're confident in the marker + turn cap).
+> **Tune the failsafe to your interview length.** The failsafe is a *fixed* timer that starts when the chat page loads and does **not** reset on activity — so if you set it too low it can reveal the Next button while the interview is still going. Set **Show next after minutes** comfortably above the longest a real interview might run (or set it to `0` to disable the failsafe entirely and rely on the marker + turn cap).
 
 > **Note:** This is a per-question setting. Leave it off for chat questions where the participant should be free to advance at any time.
 
