@@ -213,6 +213,8 @@ By default the survey's **Next** button is visible the whole time, so a particip
 1. strips the marker so the participant never sees it (and it is kept out of the saved transcript), and
 2. reveals the Next button (via Qualtrics' official `showNextButton()`, with a CSS fallback so it works in both the new and classic survey-taking experiences).
 
+The appended instruction also tells the model to ask the participant, in its final message, to **wait a few moments for the Next button to appear** and then click it. This keeps a brief reveal lag (network, the typing-delay setting, or the failsafe timer) from looking like a bug.
+
 **Nobody can get stuck.** The Next button is revealed by *any* of three paths, whichever comes first:
 
 - the marker arrives (normal case);
