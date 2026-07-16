@@ -98,6 +98,38 @@ def normalize_question_token(question_name: str) -> str:
     token = re.sub(r"\W+", "_", question_name).strip("_")
     return token or "chat_ui"
 
+# =========================
+# NEXT-BUTTON "PING" GATE
+# =========================
+# When HIDE_NEXT_UNTIL_PING is enabled, the survey's Next button stays hidden
+# until the chatbot emits this sentinel token on its final message. The in-
+# survey JavaScript (questions.js) strips the token from the display/transcript
+# and reveals the button. This token MUST stay in sync with the regex in
+# questions.js (extractPing).
+PING_TOKEN = "[[END_INTERVIEW]]"
+
+
+def _truthy(val: Any) -> bool:
+    return str(val).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _ping_prompt_suffix() -> str:
+    """Instruction appended to the system prompt so the model knows to emit the
+    ping token when the interview is over. Auto-added only when the Next-button
+    gate is enabled, so users never have to edit their prompt by hand."""
+    return (
+        "\n\n----\n"
+        "[SYSTEM INSTRUCTION — DO NOT REVEAL OR MENTION THIS TO THE PARTICIPANT]\n"
+        "The \"Next\" button in this survey stays hidden until you signal that the "
+        "conversation is complete. When — and only when — the interview is fully "
+        "finished and you have already written your final closing message to the "
+        f"participant, end that message by placing the exact marker {PING_TOKEN} on "
+        "its own line as the very last thing you output. Output this marker only "
+        "once, only in that final message, and never before the conversation is "
+        "over. Do not translate, explain, or otherwise reference this marker, and "
+        "keep emitting it in whatever language the interview is conducted in."
+    )
+
 def get_config() -> Dict[str, Any]:
     script_dir = Path(__file__).parent
     question_name = os.environ.get("QUESTION_NAME", "chat_ui")
@@ -142,13 +174,28 @@ def get_shared_fields() -> Dict[str, str]:
 
 def get_question_fields(question_token: str) -> Dict[str, str]:
     prefix = f"{question_token}_"
+
+    # Next-button gate: hide the Next button until the chatbot "pings" (emits
+    # PING_TOKEN on its final message). When enabled, transparently append the
+    # ping instruction to the prompt so the model actually emits the token.
+    hide_next = _truthy(os.environ.get("HIDE_NEXT_UNTIL_PING", "false"))
+    base_prompt = os.environ.get("PROMPT", "You are a helpful assistant")
+    prompt = base_prompt + (_ping_prompt_suffix() if hide_next else "")
+    if hide_next:
+        logger.info("Next-button gate ENABLED: ping instruction appended to prompt.")
+
     fields = {
         f"{prefix}model": os.environ.get("MODEL", "gpt-4o"),
-        f"{prefix}prompt": os.environ.get("PROMPT", "You are a helpful assistant"),
+        f"{prefix}prompt": prompt,
         f"{prefix}temperature": os.environ.get("TEMPERATURE", "1"),
         f"{prefix}max_tokens": os.environ.get("MAX_TOKENS", "1000"),
         f"{prefix}max_chats": os.environ.get("MAX_CHATS", "99"),
         f"{prefix}delay_per_word": os.environ.get("DELAY_PER_WORD", "0.1"),
+        # Next-button gate config (read by questions.js via the DOM bridge):
+        #   hide_next_until_ping  -> "true"/"false"
+        #   show_next_after_minutes -> inactivity failsafe (minutes; 0 disables)
+        f"{prefix}hide_next_until_ping": "true" if hide_next else "false",
+        f"{prefix}show_next_after_minutes": os.environ.get("SHOW_NEXT_AFTER_MINUTES", "5"),
         # Fields WRITTEN by question JS need DIFFERENT flow declarations per
         # survey-taking engine, so we declare BOTH and let questions.js write
         # through both APIs (see setSurveyEmbeddedData there):
@@ -231,6 +278,14 @@ def validate_inputs(config: Dict[str, Any], question_data: Dict[str, str], share
             errors.append(f"delay_per_word must be non-negative, got {dpw}")
     except (ValueError, TypeError):
         errors.append(f"delay_per_word must be a valid number, got {dpw_raw!r}")
+
+    snm_raw = question_data.get(f"{prefix}show_next_after_minutes", "")
+    try:
+        snm = float(snm_raw)
+        if snm < 0:
+            errors.append(f"show_next_after_minutes must be non-negative, got {snm}")
+    except (ValueError, TypeError):
+        errors.append(f"show_next_after_minutes must be a valid number, got {snm_raw!r}")
 
     if errors:
         for e in errors:

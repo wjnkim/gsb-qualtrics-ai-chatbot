@@ -185,6 +185,8 @@ This step configures your Qualtrics survey (created in Phase 5) to work with you
 | **Max response tokens** | Maximum length of AI responses for this question | `1000` is a good default |
 | **Max user conversation turns** | How many back-and-forth messages are allowed for this question | `99` for unlimited-feeling, or a smaller number to cap it |
 | **Seconds per word of delay** | How many seconds of delay (per word) before showing bot response | `0` for instant, or a slightly larger number like `0.05` to slow the response |
+| **Hide next until ping** | Hide the survey's **Next** button until the chatbot signals the conversation is over. See [Hiding the Next button until the chat is done](#hiding-the-next-button-until-the-chat-is-done). | Leave **unchecked** for the normal always-visible Next button; check it to gate the button on the chatbot |
+| **Show next after minutes** | Failsafe used only when *Hide next until ping* is on: reveal the Next button automatically after this many minutes of chat **inactivity**, even if the marker never arrives | `5` (raise it above your longest expected interview so it never fires mid-conversation; `0` disables the failsafe) |
 
 5. Click the green **Run workflow** button
 6. Wait for completion (1-2 minutes)
@@ -201,6 +203,25 @@ You can add as many chat questions as you want to a single survey. Just run the 
 Each question gets its own model, prompt, temperature, token limit, and conversation limit. Chat histories are saved separately per question — see [Where the chat transcript is stored](#where-the-chat-transcript-is-stored) for the exact column names.
 
 > **Important:** If your survey has multiple chat questions, make sure each one is on its own page in Qualtrics (this is the default). Having two chat questions on the same page is not supported.
+
+### Hiding the Next button until the chat is done
+
+By default the survey's **Next** button is visible the whole time, so a participant can click past the chatbot at any point. Enable **Hide next until ping** (Phase 6) to keep the Next button hidden until the chatbot decides the conversation is finished.
+
+**What triggers the reveal ("the ping")?** The chatbot itself. When this option is on, the build **automatically appends a hidden instruction to your system prompt** telling the model to output an end-of-chat marker — `[[END_INTERVIEW]]` — as the very last thing in its final message, and only then. You do **not** need to edit your own prompt; just word your prompt so the assistant naturally wraps up (e.g. a closing "thank you" step). The in-survey JavaScript watches every reply, and as soon as it sees the marker it:
+
+1. strips the marker so the participant never sees it (and it is kept out of the saved transcript), and
+2. reveals the Next button (via Qualtrics' official `showNextButton()`, with a CSS fallback so it works in both the new and classic survey-taking experiences).
+
+**Nobody can get stuck.** The Next button is revealed by *any* of three paths, whichever comes first:
+
+- the marker arrives (normal case);
+- the **Max user conversation turns** cap is reached; or
+- the **Show next after minutes** inactivity failsafe fires (default 5 minutes with no messages in either direction).
+
+> **Tune the failsafe to your interview length.** The failsafe timer is an *inactivity* timer — it resets on every message and only fires once the conversation has genuinely stalled, so it won't cut off an active interview. Still, set **Show next after minutes** comfortably above how long a real participant might pause mid-interview. Set it to `0` to disable the failsafe entirely (only do this if you're confident in the marker + turn cap).
+
+> **Note:** This is a per-question setting. Leave it off for chat questions where the participant should be free to advance at any time.
 
 ### Where the chat transcript is stored
 
