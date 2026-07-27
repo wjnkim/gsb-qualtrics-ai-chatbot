@@ -20,7 +20,6 @@ import time
 import random
 import uuid
 import hashlib
-from html import escape as _html_escape
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -96,12 +95,6 @@ def _sha256(text: str) -> str:
 # =========================
 
 def normalize_question_token(question_name: str) -> str:
-    # NOTE: distinct question names that differ only in non-word characters
-    # (e.g. "Chat 1" vs "Chat-1") normalize to the SAME token and would share
-    # DOM ids + embedded-data columns. ensure_chat_question() guards against this
-    # by refusing to build a second chat question whose token collides with an
-    # existing one (see _assert_no_token_collision) — so column names stay clean
-    # and a collision fails the build loudly instead of silently losing data.
     token = re.sub(r"\W+", "_", question_name).strip("_")
     return token or "chat_ui"
 
@@ -114,14 +107,6 @@ def normalize_question_token(question_name: str) -> str:
 # and reveals the button. This token MUST stay in sync with the regex in
 # questions.js (extractPing).
 PING_TOKEN = "[[END_INTERVIEW]]"
-
-# Number of embedded-data "part" fields the transcript is chunked across, to
-# stay under Qualtrics' ~20k-char per-field length cap. MUST match the value
-# questions.js reads as HISTORY_PARTS_MAX (piped via the history_parts_max field).
-try:
-    HISTORY_PARTS = max(1, int(os.environ.get("MAX_HISTORY_PARTS", "8")))
-except (TypeError, ValueError):
-    HISTORY_PARTS = 8
 
 
 def _truthy(val: Any) -> bool:
@@ -207,11 +192,7 @@ def get_question_fields(question_token: str) -> Dict[str, str]:
 
     fields = {
         f"{prefix}model": os.environ.get("MODEL", "gpt-4o"),
-        # HTML-escape the prompt: it is piped raw into a hidden <textarea> in
-        # view.html, so a literal "</textarea>" in the prompt would otherwise
-        # close the element early (truncating the prompt + breaking the page
-        # layout). The textarea's .value decodes the entities back for the model.
-        f"{prefix}prompt": _html_escape(prompt, quote=False),
+        f"{prefix}prompt": prompt,
         f"{prefix}temperature": os.environ.get("TEMPERATURE", "1"),
         f"{prefix}max_tokens": os.environ.get("MAX_TOKENS", "1000"),
         f"{prefix}max_chats": os.environ.get("MAX_CHATS", "99"),
@@ -222,8 +203,6 @@ def get_question_fields(question_token: str) -> Dict[str, str]:
         #                              (minutes; 0 disables)
         f"{prefix}hide_next_until_ping": "true" if hide_next else "false",
         f"{prefix}show_next_after_minutes": os.environ.get("SHOW_NEXT_AFTER_MINUTES", "5"),
-        # Max # of transcript part fields (read by questions.js as HISTORY_PARTS_MAX).
-        f"{prefix}history_parts_max": str(HISTORY_PARTS),
         # Fields WRITTEN by question JS need DIFFERENT flow declarations per
         # survey-taking engine, so we declare BOTH and let questions.js write
         # through both APIs (see setSurveyEmbeddedData there):
@@ -235,27 +214,11 @@ def get_question_fields(question_token: str) -> Dict[str, str]:
         # When analyzing, COALESCE the "__js_" and plain columns.
         # (Config fields above stay unprefixed: they are piped INTO the page and
         # read by JS, never written from JS.)
+        f"__js_{prefix}chat_history": "",       # new experience target
+        f"{prefix}chat_history": "",            # classic experience target
         f"__js_{prefix}chat_question_id": "",   # new experience target
         f"{prefix}chat_question_id": "",        # classic experience target
-        # Completion flag (set by JS on ping / turn cap). Doubles as end-of-chat
-        # telemetry and lets a returning respondent skip re-gating.
-        f"__js_{prefix}chat_complete": "",
-        f"{prefix}chat_complete": "",
-        # Set to "true" by JS only if an interview overflows ALL part fields (the
-        # transcript had to be trimmed to fit). Should normally stay blank.
-        f"__js_{prefix}chat_history_truncated": "",
-        f"{prefix}chat_history_truncated": "",
     }
-
-    # Transcript is chunked across HISTORY_PARTS "part" fields to stay under
-    # Qualtrics' ~20k-char per-field cap. Part 1 keeps the historical column
-    # name "<token>_chat_history"; parts 2..N are "<token>_chat_history_<i>".
-    # Both engine variants are declared for each part. When analyzing a long
-    # interview, concatenate parts 1..N (coalescing "__js_"/plain) then parse.
-    for i in range(1, HISTORY_PARTS + 1):
-        suffix = "chat_history" if i == 1 else f"chat_history_{i}"
-        fields[f"__js_{prefix}{suffix}"] = ""
-        fields[f"{prefix}{suffix}"] = ""
     logger.info("Question fields loaded for token '%s' (prefix: '%s').", question_token, prefix)
     verbose_field_logs = os.environ.get("VERBOSE_FIELD_LOGS", "false").lower() == "true"
     if logger.isEnabledFor(logging.DEBUG) and verbose_field_logs:
@@ -376,34 +339,11 @@ def read_text_file(path: Path) -> str:
     logger.debug("Read %s bytes from %s", len(text.encode("utf-8")), path.name)
     return text
 
-def _history_readback_bridges(parts: int) -> str:
-    """Hidden <textarea>s that pipe each saved transcript part back into the page
-    so questions.js can resume on load. Two per part (new-experience "__js_"
-    field + classic plain field); questions.js coalesces them. Emitted with
-    __QN__/__QNSAFE__ placeholders, expanded by build_question_html."""
-    lines = []
-    for i in range(1, parts + 1):
-        suffix = "chat_history" if i == 1 else f"chat_history_{i}"
-        lines.append(
-            f'  <textarea id="safe-hist-js-{i}-__QNSAFE__">'
-            f'${{e://Field/__js___QN__{suffix}}}</textarea>'
-        )
-        lines.append(
-            f'  <textarea id="safe-hist-{i}-__QNSAFE__">'
-            f'${{e://Field/__QN__{suffix}}}</textarea>'
-        )
-    return "\n".join(lines)
-
-
 def build_question_html(html_path: Path, css_path: Path, js_path: Path, question_name: str, question_token: str) -> str:
     logger.info("Compiling HTML/CSS/JS assets for question '%s' (token '%s')...", question_name, question_token)
     html = read_text_file(html_path)
     css = read_text_file(css_path)
     js = read_text_file(js_path)
-
-    # Expand the transcript read-back bridges placeholder BEFORE the __QN__/
-    # __QNSAFE__ substitution below (the generated markup contains those tokens).
-    html = html.replace("<!--__HISTORY_BRIDGES__-->", _history_readback_bridges(HISTORY_PARTS))
 
     html = html.replace("__QN__", f"{question_token}_").replace("__QNSAFE__", question_token)
     css = css.replace("__QNSAFE__", question_token)
@@ -802,39 +742,6 @@ def _find_or_create_chatbot_block(client: QualtricsClient, survey_id: str) -> Tu
     block_id = client.create_block(survey_id, CHATBOT_BLOCK_DESCRIPTION)
     return block_id, True
 
-def _assert_no_token_collision(
-    definition: Dict[str, Any], tag: str, token: str, question_name: str
-) -> None:
-    """Refuse to build if another EXISTING chat question already uses this token.
-
-    Distinct names that differ only in spacing/punctuation normalize to the same
-    token and would share DOM ids + embedded-data columns, silently overwriting
-    each other's transcript. We detect a real collision by the token-specific
-    marker "chat-history-<token>" in another question's text; a same-name rebuild
-    is excluded by DataExportTag and is a normal update, not a collision."""
-    questions = definition.get("Questions", {}) or {}
-    if isinstance(questions, list):
-        questions = {}
-    # Match the FULL token, not a prefix: token "chat" must not match another
-    # question's longer, distinct token "chat_sonnet" inside "chat-history-
-    # chat_sonnet". The negative lookahead (?!\w) requires a word boundary right
-    # after the token (underscore counts as a word char), so only an exact token
-    # match triggers a collision.
-    pattern = re.compile(r"chat-history-" + re.escape(token) + r"(?!\w)")
-    for qid, q in questions.items():
-        if not isinstance(q, dict) or q.get("DataExportTag") == tag:
-            continue
-        if pattern.search(q.get("QuestionText") or ""):
-            raise ValueError(
-                f"QUESTION_NAME {question_name!r} normalizes to token {token!r}, which is "
-                f"already used by another chat question (DataExportTag "
-                f"{q.get('DataExportTag')!r}, QID {qid}). Two chat questions sharing a token "
-                f"would share DOM ids and embedded-data columns and silently overwrite each "
-                f"other's transcript. Pick a QUESTION_NAME that doesn't collide — note that "
-                f"names differing only in spaces or punctuation normalize to the same token."
-            )
-
-
 def ensure_chat_question(client: QualtricsClient, survey_id: str, config: Dict[str, Any]) -> Tuple[str, bool]:
     tag = config["data_export_tag"]
     question_name = config["question_name"]
@@ -846,11 +753,6 @@ def ensure_chat_question(client: QualtricsClient, survey_id: str, config: Dict[s
         js_path=config["js_path"],
         question_name=question_name,
         question_token=question_token,
-    )
-
-    # Fail loudly if a DIFFERENT question already occupies this token's namespace.
-    _assert_no_token_collision(
-        client.get_survey_definition(survey_id), tag, question_token, question_name
     )
 
     existing_qid = client.find_question_id_by_tag(survey_id, tag)

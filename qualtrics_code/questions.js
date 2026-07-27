@@ -102,34 +102,6 @@ Qualtrics.SurveyEngine.addOnReady(function () {
   var MAX_DELAY_SECONDS = 10;
 
   /*********************************************************
-   * TRANSCRIPT STORAGE (chunked + resumable)
-   *
-   * The transcript is written to embedded data on every turn. A single
-   * Qualtrics embedded-data field has a length cap (~20k chars) and a long or
-   * verbose interview can exceed it (which silently truncates the value into
-   * unparseable JSON), so we split the serialized transcript across N declared
-   * "part" fields. Part 1 keeps the historical column name "<q>_chat_history"
-   * (so short interviews export exactly as before); parts 2..N are
-   * "<q>_chat_history_<i>". build_survey.py declares the parts and pipes them
-   * back in via hidden textareas so we can resume on load — see readBridge.
-   *********************************************************/
-  function readBridge(id) {
-    var el = document.getElementById(id);
-    var v = el ? (el.value || "") : "";
-    // Defensive: if a piped ${e://Field/...} reference didn't resolve (e.g. the
-    // field isn't declared yet), Qualtrics renders the LITERAL placeholder text.
-    // Treat that as empty so it can't corrupt resume / config. Anchored to the
-    // start so a real saved value (JSON begins with "[") is never discarded.
-    if (v.trim().indexOf("${e://") === 0) return "";
-    return v;
-  }
-
-  var HISTORY_PARTS_MAX = parseInt(readBridge("safe-history-parts-max-__QNSAFE__"), 10);
-  if (isNaN(HISTORY_PARTS_MAX) || HISTORY_PARTS_MAX < 1) HISTORY_PARTS_MAX = 8;
-  var HISTORY_CHUNK = 15000;   // chars per part field (kept under the ~20k cap)
-  var storedLen = 0;           // # messages currently persisted (for the shrink guard)
-
-  /*********************************************************
    * NEXT-BUTTON GATE (optional)
    *
    * When __QN__hide_next_until_ping === "true", the survey's built-in
@@ -174,14 +146,6 @@ Qualtrics.SurveyEngine.addOnReady(function () {
   var nextRevealed = false;
   var failsafeTimer = null;
   var failsafeStarted = false;
-  var leakGuardTimer = null;
-
-  // Whether the interview was already completed on a PRIOR visit to this page
-  // (ping or turn cap). If so we must NOT re-hide the Next button on return,
-  // or a respondent who is already done would be trapped again.
-  var alreadyComplete =
-    ((readBridge("safe-complete-js-__QNSAFE__") ||
-      readBridge("safe-complete-__QNSAFE__") || "").trim().toLowerCase() === "true");
 
   function injectHideStyle() {
     if (document.getElementById("qc-hide-style-__QNSAFE__")) return;
@@ -220,16 +184,10 @@ Qualtrics.SurveyEngine.addOnReady(function () {
     try { qthis.hideNextButton(); } catch (e) {}
   }
 
-  function revealNext(markComplete) {
+  function revealNext() {
     clearFailsafeTimer();
-    if (markComplete) {
-      // Persist that the interview genuinely finished, so returning to this page
-      // (Back/Forward or a refresh) does NOT re-gate a respondent who is done.
-      try { setSurveyEmbeddedData("__QN__chat_complete", "true"); } catch (e) {}
-    }
     if (nextRevealed) return;
     nextRevealed = true;
-    if (leakGuardTimer) { clearInterval(leakGuardTimer); leakGuardTimer = null; }
     // Remove the gating class first (the CSS rule stops matching -> visible),
     // then the official API, then a belt-and-suspenders inline clear.
     document.documentElement.classList.remove(HIDE_CLASS);
@@ -237,50 +195,6 @@ Qualtrics.SurveyEngine.addOnReady(function () {
     var b = document.getElementById("next-button") ||
             document.getElementById("NextButton");
     if (b) b.style.visibility = "visible";
-  }
-
-  // Drop the gate because we are LEAVING the page while still gated (not because
-  // the interview finished). The hide is a class on the persistent <html>
-  // targeting the SHARED #next-button, so in the new experience it would
-  // otherwise "stick" and hide the Next button on whatever page the respondent
-  // lands on next — most visibly after pressing "Back". This does NOT mark the
-  // interview complete.
-  function releaseGate() {
-    clearFailsafeTimer();
-    if (leakGuardTimer) { clearInterval(leakGuardTimer); leakGuardTimer = null; }
-    document.documentElement.classList.remove(HIDE_CLASS);
-    var b = document.getElementById("next-button") ||
-            document.getElementById("NextButton");
-    if (b) b.style.visibility = "";
-    try { qthis.showNextButton(); } catch (e) {}
-  }
-
-  // Guaranteed cleanup that does NOT depend on any navigation event firing
-  // (addOnUnload is unreliable on "Previous" in the new experience). Once this
-  // question's chat UI is no longer on screen while still gated, release the gate.
-  function startLeakGuard() {
-    var seenOnScreen = false;   // must confirm the chat was visible before releasing
-    var offscreen = 0;
-    leakGuardTimer = setInterval(function () {
-      if (nextRevealed) { clearInterval(leakGuardTimer); leakGuardTimer = null; return; }
-      var el = document.getElementById("chat-history-__QNSAFE__");
-      if (el === null) {
-        // Chat UI removed from the DOM -> we've definitely navigated away
-        // (unambiguous even if it was never observed on-screen).
-        clearInterval(leakGuardTimer); leakGuardTimer = null;
-        releaseGate();
-        return;
-      }
-      if (el.getClientRects().length > 0) { seenOnScreen = true; offscreen = 0; return; }
-      // Only treat "off-screen" as a departure AFTER the chat has been visible at
-      // least once. Otherwise the new experience's brief display:none enter-
-      // transition (addOnReady can fire before the question is painted) would be
-      // misread as navigate-away and reveal the Next button on a FRESH load.
-      if (!seenOnScreen) return;
-      if (++offscreen < 2) return;   // debounce transient blips (~1s off-screen)
-      clearInterval(leakGuardTimer); leakGuardTimer = null;
-      releaseGate();
-    }, 500);
   }
 
   // Remove the ping token (if present) from a bot message.
@@ -341,75 +255,14 @@ Qualtrics.SurveyEngine.addOnReady(function () {
     if (el && el.parentNode) el.parentNode.removeChild(el);
   }
 
-  // Show a transient error bubble WITHOUT recording it in the transcript or
-  // sending it back to the model as context.
-  function showError(msg) {
-    appendMessage(msg || "Sorry — something went wrong talking to the server.", "bot-message");
-  }
-
   /*********************************************************
    * EMBEDDED DATA SAVE
    *********************************************************/
   function saveChatHistory() {
-    // Shrink guard: never overwrite a longer stored transcript with a shorter
-    // one. Protects the recorded interview if the page is re-displayed with an
-    // empty in-memory history (a classic-experience reload, or a rehydrate that
-    // failed to parse) before it can be repopulated.
-    if (conversationHistory1.length < storedLen) return;
-    storedLen = conversationHistory1.length;
-
-    var s = JSON.stringify(conversationHistory1);
-
-    // Overflow safety valve: if the transcript somehow exceeds the declared
-    // capacity, drop the OLDEST turns until it fits rather than truncating
-    // mid-JSON (which would be unparseable). Flag it so analysis can spot the
-    // (very rare) case. With the default 8 parts this is ~120k chars of headroom.
-    var capacity = HISTORY_PARTS_MAX * HISTORY_CHUNK;
-    if (s.length > capacity) {
-      var trimmed = conversationHistory1.slice();
-      while (trimmed.length > 1 && JSON.stringify(trimmed).length > capacity) {
-        trimmed.shift();
-      }
-      s = JSON.stringify(trimmed);
-      setSurveyEmbeddedData("__QN__chat_history_truncated", "true");
-    }
-
-    // Chunk across the declared part fields. Part 1 keeps the historical column
-    // name; unused higher parts are cleared to "" so read-back stops at the
-    // first empty part.
-    for (var i = 1; i <= HISTORY_PARTS_MAX; i++) {
-      var chunk = s.slice((i - 1) * HISTORY_CHUNK, i * HISTORY_CHUNK);
-      var key = (i === 1) ? "__QN__chat_history" : "__QN__chat_history_" + i;
-      setSurveyEmbeddedData(key, chunk);
-    }
-  }
-
-  // Read one transcript part back from the DOM bridge, coalescing the two
-  // engine variants (new-experience "__js_" field vs. classic plain field).
-  function readHistoryPart(i) {
-    return readBridge("safe-hist-js-" + i + "-__QNSAFE__") ||
-           readBridge("safe-hist-" + i + "-__QNSAFE__");
-  }
-
-  // Reassemble the full serialized transcript from its parts. Parts are
-  // contiguous, so the first empty part marks the end.
-  function readSavedHistoryRaw() {
-    var out = "";
-    for (var i = 1; i <= HISTORY_PARTS_MAX; i++) {
-      var v = readHistoryPart(i);
-      if (!v) break;
-      out += v;
-    }
-    return out;
-  }
-
-  function renderSavedHistory(arr) {
-    for (var i = 0; i < arr.length; i++) {
-      var m = arr[i];
-      if (!m || typeof m.content !== "string") continue;
-      if (m.role === "user") appendMessage(m.content, "user-message");
-      else if (m.role === "assistant") appendMessage(m.content, "bot-message");
-    }
+    setSurveyEmbeddedData(
+      "__QN__chat_history",
+      JSON.stringify(conversationHistory1)
+    );
   }
 
   /*********************************************************
@@ -437,12 +290,7 @@ Qualtrics.SurveyEngine.addOnReady(function () {
     }
 
     if (parsed.ping) {
-      revealNext(true);
-    } else if (HIDE_NEXT) {
-      // The model just answered the final allowed user turn: reveal now instead
-      // of waiting for the next (rejected) send attempt or the failsafe timer.
-      var uTurns = conversationHistory1.filter(function (x) { return x.role === "user"; }).length;
-      if (uTurns >= MAX_CHATS) revealNext(true);
+      revealNext();
     }
   }
 
@@ -463,7 +311,7 @@ Qualtrics.SurveyEngine.addOnReady(function () {
 
     if (userTurns >= MAX_CHATS) {
       appendMessage("Chat limit reached. Please continue the survey.", "bot-message");
-      revealNext(true);   // never trap the respondent once the cap is hit
+      revealNext();   // never trap the respondent once the cap is hit
       return;
     }
 
@@ -513,41 +361,26 @@ Qualtrics.SurveyEngine.addOnReady(function () {
         max_tokens: maxTokens
       })
     })
-      .then(function (response) {
-        if (!response.ok) {
-          // Proxy returned an error status (rate limit, disabled, upstream error).
-          // Surface it, but do NOT fabricate an assistant turn in the transcript.
-          removeTypingIndicator(typingEl);
-          showError("The assistant is temporarily unavailable. Please wait a moment and try again.");
-          return null;
-        }
-        return response.json();
-      })
+      .then(function (response) { return response.json(); })
       .then(function (data) {
-        if (!data) return;   // error already handled above
-        var text = (data && typeof data.text === "string") ? data.text.trim() : "";
-        if (!text) {
-          // 200 with no usable completion — treat as a transient error rather than
-          // recording a fake "(no response)" turn and echoing it back to the model.
-          removeTypingIndicator(typingEl);
-          showError("The assistant didn't return a response. Please try again.");
-          return;
-        }
+        // Strip the ping token BEFORE measuring word count / rendering.
+        var parsed = extractPing(data && data.text ? data.text.trim() : "(no response)");
+        var display = parsed.text;
+        if (!display && !parsed.ping) display = "(no response)";
 
-        // Strip the ping token BEFORE measuring word count for the typing delay.
-        var parsed = extractPing(text);
-        var wordCount = parsed.text.split(/\s+/).filter(Boolean).length;
+        // Dynamic delay: scale by word count to mimic human typing speed
+        var wordCount = display.split(/\s+/).filter(Boolean).length;
         var dynamicDelay = Math.min(wordCount * DELAY_PER_WORD, MAX_DELAY_SECONDS) * 1000;
 
         setTimeout(function () {
           removeTypingIndicator(typingEl);
-          handleBotReply(text);
+          handleBotReply(data && data.text ? data.text.trim() : "(no response)");
         }, dynamicDelay);
       })
       .catch(function (error) {
         console.error("Proxy fetch error:", error);
         removeTypingIndicator(typingEl);
-        showError("Sorry — something went wrong talking to the server.");
+        appendMessage("Sorry — something went wrong talking to the server.", "bot-message");
         // Do not reveal here: the failsafe timer (started on load) will reveal
         // the Next button when it elapses, without letting a transient blip end
         // the interview early.
@@ -594,90 +427,31 @@ Qualtrics.SurveyEngine.addOnReady(function () {
       max_tokens: maxTokens
     })
   })
-    .then(function (response) {
-      if (!response.ok) {
-        removeTypingIndicator(typingEl);
-        showError("Couldn't start the conversation just now. Please wait a few moments — a Continue button will appear shortly — or try refreshing the page.");
-        return null;
-      }
-      return response.json();
-    })
+    .then(function (response) { return response.json(); })
     .then(function (data) {
-      if (!data) return;   // error already handled above
       removeTypingIndicator(typingEl);
-      var text = (data && typeof data.text === "string") ? data.text.trim() : "";
-      if (!text) {
-        showError("Couldn't start the conversation just now. Please wait a few moments — a Continue button will appear shortly.");
-        return;
-      }
       // Defensive: honor a ping even on the opening turn (normally absent).
-      handleBotReply(text);
+      handleBotReply(data && data.text ? data.text.trim() : "(no response)");
     })
     .catch(function (error) {
       console.error("Kickoff error:", error);
       removeTypingIndicator(typingEl);
-      showError("Couldn't start the conversation — please check your connection. A Continue button will appear shortly.");
     });
   }
 
-  // Rehydrate any previously-saved transcript so returning to this page
-  // (Back/Forward or a refresh) RESUMES the conversation instead of starting a
-  // new one and overwriting the recorded interview.
-  var resumeBlocked = false;   // a saved transcript exists but couldn't be read back
-  (function resumeSavedHistory() {
-    var raw = readSavedHistoryRaw();
-    if (!raw) return;
-    try {
-      var arr = JSON.parse(raw);
-      if (Array.isArray(arr) && arr.length) {
-        conversationHistory1 = arr;
-        storedLen = arr.length;
-        renderSavedHistory(arr);
-        return;
-      }
-    } catch (e) {
-      // A saved transcript exists but we can't read it back intact — e.g. the
-      // rare case of a literal "</textarea>" typed into the chat corrupting the
-      // (hidden) DOM bridge. Fail CLOSED: don't start a fresh conversation and
-      // block all writes (storedLen = Infinity) so the recorded interview that
-      // is still safely stored server-side is never overwritten.
-      resumeBlocked = true;
-      storedLen = Infinity;
-      showError("We couldn't fully restore your previous conversation, but your earlier responses are saved. Please continue with the survey.");
-    }
-  })();
-
-  // Gate the Next button (if configured) before starting the conversation —
-  // unless the interview was already completed on a prior visit, in which case
-  // re-hiding it would trap a respondent who is already done.
+  // Gate the Next button (if configured) before starting the conversation.
   if (HIDE_NEXT) {
-    // Don't re-gate if the interview already finished on a prior visit, or if we
-    // couldn't restore a saved conversation (the respondent can't meaningfully
-    // continue the chat, so let them proceed).
-    if (alreadyComplete || resumeBlocked) {
-      revealNext(false);
-    } else {
-      hideNext();
-      startFailsafeTimer();
-      startLeakGuard();
-    }
+    hideNext();
+    startFailsafeTimer();
   }
 
-  // Only auto-start when there is genuinely no prior conversation to resume and
-  // we're not in the fail-closed "couldn't restore" state.
-  if (conversationHistory1.length === 0 && !resumeBlocked) {
+  // Only auto-start if there's no existing chat history (handles back-navigation)
+  if (conversationHistory1.length === 0) {
     kickoffBot();
   }
 
 });
 
 Qualtrics.SurveyEngine.addOnUnload(function () {
-  // Fast cleanup so this question's Next-button gate never carries onto the next
-  // page shown. The in-page leak guard (startLeakGuard in addOnReady) is the
-  // GUARANTEED fallback for navigations that don't fire this hook (e.g.
-  // "Previous" in the new experience). This is a separate closure from
-  // addOnReady, so it uses the build-time class literal rather than HIDE_CLASS.
-  try { document.documentElement.classList.remove("qc-hide-next-__QNSAFE__"); } catch (e) {}
-  var b = document.getElementById("next-button") || document.getElementById("NextButton");
-  if (b) b.style.visibility = "";
+  // runs when leaving the page
 });
