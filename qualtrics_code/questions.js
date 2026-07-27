@@ -118,6 +118,38 @@ Qualtrics.SurveyEngine.addOnReady(function () {
     return el ? (el.value || "") : "";
   }
 
+  /*********************************************************
+   * BROWSER-SIDE RESUME (localStorage) — primary resume source
+   *
+   * Embedded data written from JS only reaches the server on submit / periodic
+   * autosave, so on a MID-PAGE refresh the piped ${e://Field/..._chat_history}
+   * reflects a STALE server snapshot and resume would jump back to an EARLIER
+   * point in the chat. localStorage is written synchronously every turn and
+   * survives a refresh instantly, so it is the primary resume source; embedded
+   * data remains the researcher's exported record + a cross-device fallback.
+   *
+   * Keyed by ResponseID so it can NEVER bleed across participants who share a
+   * browser (e.g. a lab computer). If the ResponseID pipe is missing/unresolved
+   * we return null and skip localStorage entirely rather than risk a shared key.
+   *********************************************************/
+  function lsKey() {
+    var rid = readBridge("safe-response-id-__QNSAFE__").trim();
+    if (!rid || rid.indexOf("${") !== -1) return null;   // unresolved/missing pipe -> no localStorage
+    return "qc_hist_" + "__QNSAFE__" + "_" + rid;
+  }
+  function readLocalHistory() {
+    try {
+      var k = lsKey();
+      return (k && window.localStorage) ? (window.localStorage.getItem(k) || "") : "";
+    } catch (e) { return ""; }
+  }
+  function writeLocalHistory(s) {
+    try {
+      var k = lsKey();
+      if (k && window.localStorage) window.localStorage.setItem(k, s);
+    } catch (e) {}
+  }
+
   var HISTORY_PARTS_MAX = parseInt(readBridge("safe-history-parts-max-__QNSAFE__"), 10);
   if (isNaN(HISTORY_PARTS_MAX) || HISTORY_PARTS_MAX < 1) HISTORY_PARTS_MAX = 8;
   var HISTORY_CHUNK = 15000;   // chars per part field (kept under the ~20k cap)
@@ -341,6 +373,11 @@ Qualtrics.SurveyEngine.addOnReady(function () {
     storedLen = conversationHistory1.length;
 
     var s = JSON.stringify(conversationHistory1);
+
+    // Primary resume source: full transcript in localStorage. Written first and
+    // untrimmed (no ~20k cap there), so a mid-page refresh resumes the CURRENT
+    // conversation instead of a stale server snapshot.
+    writeLocalHistory(s);
 
     // Overflow safety valve: if the transcript somehow exceeds the declared
     // capacity, drop the OLDEST turns until it fits rather than truncating
@@ -607,7 +644,10 @@ Qualtrics.SurveyEngine.addOnReady(function () {
   // new one and overwriting the recorded interview.
   var resumeBlocked = false;   // a saved transcript exists but couldn't be read back
   (function resumeSavedHistory() {
-    var raw = readSavedHistoryRaw();
+    // Prefer localStorage (always current on refresh); fall back to the piped
+    // embedded-data snapshot (cross-device, or if localStorage is unavailable).
+    var raw = readLocalHistory();
+    if (!raw) raw = readSavedHistoryRaw();
     if (!raw) return;
     try {
       var arr = JSON.parse(raw);
