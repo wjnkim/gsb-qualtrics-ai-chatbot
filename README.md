@@ -234,13 +234,7 @@ The full conversation (and the chat question's QID) is saved to your survey resp
 | **New** (a.k.a. Simple Layout / New Survey-Taking Experience) | `__js_<question>_chat_history` |
 | **Classic** | `<question>_chat_history` |
 
-For example, for a question named `Chat_GPT4` the transcript lands in `__js_Chat_GPT4_chat_history` **or** `Chat_GPT4_chat_history`. (The column name is a normalized form of your Question name, so spaces/punctuation become underscores. If two question names would normalize to the same column prefix — e.g. `Chat 1` vs `Chat-1` — the build **stops with an error** rather than letting the two questions silently share columns; just pick distinct names.)
-
-When exporting or analyzing:
-1. **Coalesce** the `__js_` and plain columns (use whichever is non-empty). The same applies to `…_chat_question_id` and `…_chat_complete`.
-2. **Concatenate the transcript parts, then parse.** A long transcript is split across `…_chat_history`, `…_chat_history_2`, `…_chat_history_3`, … (up to `MAX_HISTORY_PARTS`, default 8) so no single field exceeds Qualtrics' length cap. Join parts `1..N` in order (each already coalesced per step 1) and then `JSON.parse` the result. Short interviews use only part 1, exactly as before.
-
-Two extra per-question fields help interpret a response: `…_chat_complete` is `"true"` when the interview ended by the chatbot's end-of-chat marker or the turn cap (blank if it ended only via the failsafe timer), and `…_chat_history_truncated` is `"true"` only in the rare case a transcript overflowed all parts and had to be trimmed.
+For example, for a question named `Chat_GPT4` the transcript lands in `__js_Chat_GPT4_chat_history` **or** `Chat_GPT4_chat_history`. When exporting or analyzing, **coalesce the two columns** (use whichever is non-empty). The same applies to `…_chat_question_id`.
 
 > **Why two fields?** In Qualtrics' new survey-taking experience, `Qualtrics.SurveyEngine.setEmbeddedData()` is a deprecated no-op, and `setJSEmbeddedData()` only persists to a Survey Flow field declared **with a `__js_` prefix**. The classic engine uses the un-prefixed field with `setEmbeddedData()`. The build handles both automatically — you don't need to configure anything. (Note: **Preview responses are never recorded** — to confirm saving, take the survey through a real/anonymous link and check Data & Analysis.)
 

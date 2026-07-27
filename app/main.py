@@ -35,10 +35,7 @@ def stanford_proxy(request):
     # 1. Request Validation
     # ==========================================
     # Handle OPTIONS Request
-    # Fail closed, not crashed: if ALLOWED_ORIGINS is unset, treat it as an empty
-    # allow-list (origin checks below reject with 401) rather than throwing
-    # AttributeError on None.split(...) -> an uncaught 500 on EVERY request.
-    ALLOWED_ORIGINS = [x.strip() for x in (os.environ.get('ALLOWED_ORIGINS') or '').split(',') if x.strip()]
+    ALLOWED_ORIGINS = [x.replace(' ','') for x in os.environ.get('ALLOWED_ORIGINS').split(',')]
     origin = request.headers.get("Origin", "")
     if request.method == 'OPTIONS':
         headers = {
