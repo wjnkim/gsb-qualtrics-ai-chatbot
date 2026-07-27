@@ -115,7 +115,13 @@ Qualtrics.SurveyEngine.addOnReady(function () {
    *********************************************************/
   function readBridge(id) {
     var el = document.getElementById(id);
-    return el ? (el.value || "") : "";
+    var v = el ? (el.value || "") : "";
+    // Defensive: if a piped ${e://Field/...} reference didn't resolve (e.g. the
+    // field isn't declared yet), Qualtrics renders the LITERAL placeholder text.
+    // Treat that as empty so it can't corrupt resume / config. Anchored to the
+    // start so a real saved value (JSON begins with "[") is never discarded.
+    if (v.trim().indexOf("${e://") === 0) return "";
+    return v;
   }
 
   var HISTORY_PARTS_MAX = parseInt(readBridge("safe-history-parts-max-__QNSAFE__"), 10);
@@ -253,12 +259,24 @@ Qualtrics.SurveyEngine.addOnReady(function () {
   // (addOnUnload is unreliable on "Previous" in the new experience). Once this
   // question's chat UI is no longer on screen while still gated, release the gate.
   function startLeakGuard() {
+    var seenOnScreen = false;   // must confirm the chat was visible before releasing
     var offscreen = 0;
     leakGuardTimer = setInterval(function () {
       if (nextRevealed) { clearInterval(leakGuardTimer); leakGuardTimer = null; return; }
       var el = document.getElementById("chat-history-__QNSAFE__");
-      var onScreen = el && el.getClientRects().length > 0;
-      if (onScreen) { offscreen = 0; return; }
+      if (el === null) {
+        // Chat UI removed from the DOM -> we've definitely navigated away
+        // (unambiguous even if it was never observed on-screen).
+        clearInterval(leakGuardTimer); leakGuardTimer = null;
+        releaseGate();
+        return;
+      }
+      if (el.getClientRects().length > 0) { seenOnScreen = true; offscreen = 0; return; }
+      // Only treat "off-screen" as a departure AFTER the chat has been visible at
+      // least once. Otherwise the new experience's brief display:none enter-
+      // transition (addOnReady can fire before the question is painted) would be
+      // misread as navigate-away and reveal the Next button on a FRESH load.
+      if (!seenOnScreen) return;
       if (++offscreen < 2) return;   // debounce transient blips (~1s off-screen)
       clearInterval(leakGuardTimer); leakGuardTimer = null;
       releaseGate();
