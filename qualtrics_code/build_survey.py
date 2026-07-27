@@ -815,11 +815,16 @@ def _assert_no_token_collision(
     questions = definition.get("Questions", {}) or {}
     if isinstance(questions, list):
         questions = {}
-    marker = f"chat-history-{token}"
+    # Match the FULL token, not a prefix: token "chat" must not match another
+    # question's longer, distinct token "chat_sonnet" inside "chat-history-
+    # chat_sonnet". The negative lookahead (?!\w) requires a word boundary right
+    # after the token (underscore counts as a word char), so only an exact token
+    # match triggers a collision.
+    pattern = re.compile(r"chat-history-" + re.escape(token) + r"(?!\w)")
     for qid, q in questions.items():
         if not isinstance(q, dict) or q.get("DataExportTag") == tag:
             continue
-        if marker in (q.get("QuestionText") or ""):
+        if pattern.search(q.get("QuestionText") or ""):
             raise ValueError(
                 f"QUESTION_NAME {question_name!r} normalizes to token {token!r}, which is "
                 f"already used by another chat question (DataExportTag "
