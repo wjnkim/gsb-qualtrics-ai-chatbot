@@ -273,7 +273,7 @@ Qualtrics.SurveyEngine.addOnReady(function () {
    *
    * A clear winner is required (enough hits AND a margin over the runner
    * up). When there isn't one, detectChatLanguage() returns "" and the
-   * caller labels the button in all three languages rather than guessing.
+   * caller falls back to English rather than guessing between the three.
    *********************************************************/
   function wordSet(s) {
     var o = {};
@@ -351,15 +351,18 @@ Qualtrics.SurveyEngine.addOnReady(function () {
       : "";
 
     var langs;
-    if (TROUBLE_LANG === "en" || TROUBLE_LANG === "fr" || TROUBLE_LANG === "es") {
-      langs = [TROUBLE_LANG];
-    } else if (TROUBLE_LANG === "auto" && detected) {
-      langs = [detected];
-    } else {
-      // "multi", or "auto" with no confident answer: show every language, the
-      // most likely one first. Longer, but it can never be the wrong language.
+    if (TROUBLE_LANG === "multi") {
+      // Every language, the most likely one first. Longer, but it can never be
+      // the wrong language.
       langs = TROUBLE_LANG_ORDER.filter(function (l) { return l !== detected; });
       if (detected) langs.unshift(detected);
+    } else if (TROUBLE_LANG === "auto") {
+      // No confident read -> English. Use "multi" if you would rather show all
+      // three than fall back to one. (chat_lang still records "unknown", so a
+      // fallback is distinguishable from a confident "en" in the export.)
+      langs = [detected || "en"];
+    } else {
+      langs = [TROUBLE_LANG];
     }
 
     var lines = [];

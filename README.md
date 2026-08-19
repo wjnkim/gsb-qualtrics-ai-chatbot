@@ -188,7 +188,7 @@ This step configures your Qualtrics survey (created in Phase 5) to work with you
 | **Hide next until ping** | Hide the survey's **Next** button until the chatbot signals the conversation is over. See [Hiding the Next button until the chat is done](#hiding-the-next-button-until-the-chat-is-done). | Leave **unchecked** for the normal always-visible Next button; check it to gate the button on the chatbot |
 | **Show next after minutes** | Failsafe used only when *Hide next until ping* is on: a **fixed timer** that reveals the Next button this many minutes after the chat loads, even if the marker never arrives | `5` (set it above your longest expected interview, since the timer does **not** reset on activity; `0` disables the failsafe) |
 | **Timeout next style** | How the Next button *looks* when the **failsafe timer** is what revealed it. See [Telling the two reveals apart](#telling-the-two-reveals-apart). | `trouble` (a red button that says "click here if you are having trouble with the chatbot"); `default` for the old behaviour |
-| **Timeout next lang** | Which language that wording is in. `auto` reads the language off the conversation — use it when your prompt lets the participant choose English/French/Spanish. | `auto`; use `multi` to always show all three languages |
+| **Timeout next lang** | Which language that wording is in. `auto` reads the language off the conversation (falling back to English if it cannot tell) — use it when your prompt lets the participant choose English/French/Spanish. | `auto`; use `multi` to always show all three languages |
 | **Timeout next label** | Optional custom wording. One string for every language, or per-language: `en=… \| fr=… \| es=…` | Blank (use the built-in wording) |
 | **Timeout next color** | Hex colour for the timeout button | `#C0392B` |
 
@@ -253,13 +253,15 @@ Some prompts open by asking the participant whether to continue in English, Fren
 
 | Value | Behaviour |
 |---|---|
-| `auto` *(default)* | Work out the language from the conversation itself, and word the button to match |
+| `auto` *(default)* | Work out the language from the conversation itself, and word the button to match. **Falls back to English** when it cannot tell. |
 | `en` / `fr` / `es` | Always use that language |
 | `multi` | Always show all three languages, one per line |
 
 `auto` reads the language off the text the **chatbot** has most recently written (its last few turns — the opening turn is skipped, since that is usually the "which language?" menu itself). It scores function words that only one of the three languages uses, plus letters only one language has (`ñ ¿ ¡` → Spanish, `ç è ê œ` → French). No extra marker is asked of the model and nothing is added to your prompt.
 
-**When it is not confident, it does not guess** — it falls back to showing all three languages, exactly like `multi`. That makes the wrong-language failure mode impossible; the cost is a longer button in the ambiguous cases.
+**When it is not confident, it does not guess between the three — it uses English.** In practice that is the case where the participant has barely said anything yet, so there is not much of a conversation to be in the wrong language *about*. Pick `multi` instead if you would rather show all three languages than fall back to one.
+
+Either way the export tells you which happened: `…_chat_lang` records `unknown` for a fallback, so it is never confused with a confident `en`.
 
 Set **Timeout next lang** explicitly to `en`, `fr`, or `es` for a single-language study, and use **Timeout next label** if you want your own wording:
 

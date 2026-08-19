@@ -70,7 +70,7 @@ on:
           - trouble
           - default
       timeout_next_lang:
-        description: "Language for that 'having trouble' wording. 'auto' reads the language off the conversation (for prompts that let the participant pick English/French/Spanish); 'multi' always shows all three."
+        description: "Language for that 'having trouble' wording. 'auto' reads the language off the conversation (for prompts that let the participant pick English/French/Spanish) and falls back to English if it can't tell; 'multi' always shows all three."
         required: false
         default: "auto"
         type: choice
