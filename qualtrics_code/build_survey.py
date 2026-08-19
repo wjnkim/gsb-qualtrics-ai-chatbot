@@ -205,6 +205,26 @@ def get_question_fields(question_token: str) -> Dict[str, str]:
     if hide_next:
         logger.info("Next-button gate ENABLED: ping instruction appended to prompt.")
 
+    # How the Next button looks when the FAILSAFE TIMER reveals it, as opposed
+    # to the chatbot's end-of-chat marker. A timer reveal means the participant
+    # may still be mid-interview with a chatbot that isn't cooperating, so by
+    # default the button is shown in a warning colour with "click here if you
+    # are having trouble with the chatbot" wording — clearly distinct from the
+    # ordinary "you're done" Next button a marker reveal produces.
+    #   trouble (default) -> warning colour + explicit wording
+    #   default           -> the survey's normal Next button (old behaviour)
+    timeout_style = (os.environ.get("TIMEOUT_NEXT_STYLE") or "trouble").strip().lower()
+    # Which language to word that button in. Interviews may let the participant
+    # choose English/French/Spanish mid-chat, so "auto" lets questions.js read
+    # the language off the conversation; en/fr/es force one; "multi" always
+    # shows all three (never wrong, just longer).
+    timeout_lang = (os.environ.get("TIMEOUT_NEXT_LANG") or "auto").strip().lower()
+    # Optional custom wording. Either one string, or per-language overrides
+    # written as "en=... | fr=... | es=...". Escaped like the prompt because it
+    # is piped raw into a hidden <textarea>.
+    timeout_label = os.environ.get("TIMEOUT_NEXT_LABEL") or ""
+    timeout_color = (os.environ.get("TIMEOUT_NEXT_COLOR") or "").strip() or "#C0392B"
+
     fields = {
         f"{prefix}model": os.environ.get("MODEL", "gpt-4o"),
         # HTML-escape the prompt: it is piped raw into a hidden <textarea> in
@@ -222,6 +242,12 @@ def get_question_fields(question_token: str) -> Dict[str, str]:
         #                              (minutes; 0 disables)
         f"{prefix}hide_next_until_ping": "true" if hide_next else "false",
         f"{prefix}show_next_after_minutes": os.environ.get("SHOW_NEXT_AFTER_MINUTES", "5"),
+        #   timeout_next_style / _lang / _label / _color -> look + wording of the
+        #                              Next button on a failsafe-TIMER reveal
+        f"{prefix}timeout_next_style": timeout_style,
+        f"{prefix}timeout_next_lang": timeout_lang,
+        f"{prefix}timeout_next_label": _html_escape(timeout_label, quote=False),
+        f"{prefix}timeout_next_color": timeout_color,
         # Max # of transcript part fields (read by questions.js as HISTORY_PARTS_MAX).
         f"{prefix}history_parts_max": str(HISTORY_PARTS),
         # Fields WRITTEN by question JS need DIFFERENT flow declarations per
@@ -245,6 +271,17 @@ def get_question_fields(question_token: str) -> Dict[str, str]:
         # transcript had to be trimmed to fit). Should normally stay blank.
         f"__js_{prefix}chat_history_truncated": "",
         f"{prefix}chat_history_truncated": "",
+        # Set to "true" by JS when the FAILSAFE TIMER (rather than the end-of-chat
+        # marker or the turn cap) is what revealed the Next button — i.e. this
+        # respondent was shown the "having trouble with the chatbot" escape
+        # hatch. chat_lang records the language the button was worded in
+        # ("en"/"fr"/"es", or "unknown" when the sniffer wasn't confident and all
+        # three were shown), so the detection can be audited against the
+        # transcript. Both stay blank for interviews that ended normally.
+        f"__js_{prefix}chat_timeout_reveal": "",
+        f"{prefix}chat_timeout_reveal": "",
+        f"__js_{prefix}chat_lang": "",
+        f"{prefix}chat_lang": "",
     }
 
     # Transcript is chunked across HISTORY_PARTS "part" fields to stay under
@@ -330,6 +367,24 @@ def validate_inputs(config: Dict[str, Any], question_data: Dict[str, str], share
             errors.append(f"show_next_after_minutes must be non-negative, got {snm}")
     except (ValueError, TypeError):
         errors.append(f"show_next_after_minutes must be a valid number, got {snm_raw!r}")
+
+    style_raw = question_data.get(f"{prefix}timeout_next_style", "")
+    if style_raw not in ("trouble", "default"):
+        errors.append(
+            f"timeout_next_style must be 'trouble' or 'default', got {style_raw!r}"
+        )
+
+    lang_raw = question_data.get(f"{prefix}timeout_next_lang", "")
+    if lang_raw not in ("auto", "en", "fr", "es", "multi"):
+        errors.append(
+            f"timeout_next_lang must be one of auto|en|fr|es|multi, got {lang_raw!r}"
+        )
+
+    color_raw = question_data.get(f"{prefix}timeout_next_color", "")
+    if not re.fullmatch(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})", color_raw):
+        errors.append(
+            f"timeout_next_color must be a hex colour like '#C0392B', got {color_raw!r}"
+        )
 
     if errors:
         for e in errors:

@@ -61,6 +61,33 @@ on:
         description: "Failsafe: reveal the Next button this many minutes after the chat loads even without the marker (fixed timer; only used when 'hide_next_until_ping' is on; 0 disables). Set above your longest expected interview."
         required: false
         default: "5"
+      timeout_next_style:
+        description: "How the Next button looks when the FAILSAFE TIMER reveals it (not the end-of-chat marker). 'trouble' = warning colour + 'click here if you are having trouble with the chatbot'. 'default' = the survey's normal Next button."
+        required: false
+        default: "trouble"
+        type: choice
+        options:
+          - trouble
+          - default
+      timeout_next_lang:
+        description: "Language for that 'having trouble' wording. 'auto' reads the language off the conversation (for prompts that let the participant pick English/French/Spanish) and falls back to English if it can't tell; 'multi' always shows all three."
+        required: false
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - en
+          - fr
+          - es
+          - multi
+      timeout_next_label:
+        description: "Optional custom wording for the timeout button. One string for every language, or per-language: 'en=... | fr=... | es=...'. Leave blank to use the built-in wording."
+        required: false
+        default: ""
+      timeout_next_color:
+        description: "Hex colour for the timeout button (e.g. #C0392B)."
+        required: false
+        default: "#C0392B"
 
 jobs:
   build-survey:
@@ -138,6 +165,10 @@ jobs:
           DELAY_PER_WORD: ${{ inputs.delay_per_word }}
           HIDE_NEXT_UNTIL_PING: ${{ inputs.hide_next_until_ping }}
           SHOW_NEXT_AFTER_MINUTES: ${{ inputs.show_next_after_minutes }}
+          TIMEOUT_NEXT_STYLE: ${{ inputs.timeout_next_style }}
+          TIMEOUT_NEXT_LANG: ${{ inputs.timeout_next_lang }}
+          TIMEOUT_NEXT_LABEL: ${{ inputs.timeout_next_label }}
+          TIMEOUT_NEXT_COLOR: ${{ inputs.timeout_next_color }}
 
           # Debug logging (explicit opt-in)
           LOG_LEVEL: ${{ inputs.debug_mode == true && 'DEBUG' || 'INFO' }}
